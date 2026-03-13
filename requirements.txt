@@ -1,0 +1,17 @@
+PyPDF2
+openai
+google-auth-oauthlib
+google-api-python-client
+requests
+faster-whisper
+pydub
+pytest
+stripe
+fastapi
+uvicorn
+reportlab
+pillow
+psycopg2-binary
+sqlalchemy
+apscheduler
+python-multipart

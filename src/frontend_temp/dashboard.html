@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Help U Bookkeeper</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-50 flex flex-col md:flex-row min-h-screen">
+    <!-- Sidebar -->
+    <aside class="w-full md:w-64 bg-white border-r border-gray-200 p-6 flex flex-col space-y-8">
+        <div class="flex items-center space-x-3">
+            <div class="bg-blue-600 text-white p-2 rounded-lg font-bold">HU</div>
+            <h1 class="text-xl font-bold text-gray-900 tracking-tight">Help U</h1>
+        </div>
+        
+        <nav class="flex-1 space-y-2">
+            <a href="#" class="flex items-center space-x-3 bg-blue-50 text-blue-700 p-3 rounded-xl font-semibold">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>
+                <span>Dashboard</span>
+            </a>
+            <a href="#" class="flex items-center space-x-3 text-gray-500 hover:bg-gray-50 p-3 rounded-xl transition">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                <span>GST Reports</span>
+            </a>
+            <a href="#" class="flex items-center space-x-3 text-gray-500 hover:bg-gray-50 p-3 rounded-xl transition">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg>
+                <span>Settings</span>
+            </a>
+        </nav>
+
+        <div class="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-2xl p-4 text-white">
+            <p class="text-xs opacity-75 mb-1">Current Plan</p>
+            <p class="font-bold mb-3">Free Trial (7 Days)</p>
+            <button class="bg-white text-blue-600 text-xs font-bold py-2 px-4 rounded-lg w-full">Upgrade Now</button>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 p-8">
+        <header class="flex justify-between items-center mb-10">
+            <div>
+                <h2 class="text-2xl font-bold text-gray-900">Account Dashboard</h2>
+                <p class="text-gray-500">Welcome back, Aditya Akella</p>
+            </div>
+            <div class="flex items-center space-x-4">
+                <div class="text-right">
+                    <p class="text-sm font-bold text-gray-900">+91 97033 33319</p>
+                    <p class="text-xs text-green-600 font-semibold">● Linked & Active</p>
+                </div>
+                <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Aditya" class="w-12 h-12 bg-gray-200 rounded-full border-2 border-white shadow-sm">
+            </div>
+        </header>
+
+        <!-- Stats Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                <p class="text-gray-400 text-sm font-medium mb-1">Bills Processed</p>
+                <p class="text-3xl font-bold text-gray-900">12</p>
+            </div>
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                <p class="text-gray-400 text-sm font-medium mb-1">Total Sales</p>
+                <p class="text-3xl font-bold text-gray-900">₹45,200</p>
+            </div>
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                <p class="text-gray-400 text-sm font-medium mb-1">Total Purchases</p>
+                <p class="text-3xl font-bold text-gray-900">₹18,500</p>
+            </div>
+        </div>
+
+        <!-- Drive Access Card -->
+        <div class="bg-white rounded-3xl p-8 border border-gray-100 shadow-sm flex flex-col md:flex-row items-center justify-between space-y-4 md:space-y-0">
+            <div class="flex items-center space-x-6">
+                <div class="bg-blue-100 text-blue-600 p-4 rounded-2xl">
+                    <svg class="w-10 h-10" fill="currentColor" viewBox="0 0 20 20"><path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"></path></svg>
+                </div>
+                <div>
+                    <h3 class="text-xl font-bold text-gray-900">Your Google Drive Ledger</h3>
+                    <p class="text-gray-500">Access your Master Ledger sheet and Purchase folder directly.</p>
+                </div>
+            </div>
+            <div class="flex space-x-3">
+                <a href="#" class="bg-gray-100 text-gray-700 font-bold py-3 px-6 rounded-xl hover:bg-gray-200 transition">View Folder</a>
+                <a href="#" class="bg-blue-600 text-white font-bold py-3 px-6 rounded-xl hover:bg-blue-700 transition">Open Spreadsheet</a>
+            </div>
+        </div>
+    </main>
+</body>
+</html>

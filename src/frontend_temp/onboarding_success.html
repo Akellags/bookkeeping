@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Success - Help U Bookkeeper</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-50 flex flex-col items-center justify-center min-h-screen p-4 text-center">
+    <div class="max-w-md w-full bg-white rounded-3xl shadow-2xl p-10 space-y-8 border border-gray-100">
+        <!-- Success Icon -->
+        <div class="mx-auto bg-green-100 text-green-600 p-4 rounded-full w-20 h-20 flex items-center justify-center shadow-inner">
+            <svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path>
+            </svg>
+        </div>
+
+        <div class="space-y-4">
+            <h1 class="text-3xl font-extrabold text-gray-900 tracking-tight">You're All Set! 🚀</h1>
+            <p class="text-gray-500 text-lg leading-relaxed">
+                Your <strong>Google Drive</strong> is now linked and your <strong>Master Ledger</strong> has been initialized.
+            </p>
+        </div>
+
+        <!-- Details Card -->
+        <div class="bg-blue-50 rounded-2xl p-6 text-left space-y-3">
+            <div class="flex items-center space-x-3 text-blue-700">
+                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"></path></svg>
+                <span class="font-semibold text-sm">Folder: /Help U</span>
+            </div>
+            <div class="flex items-center space-x-3 text-blue-700">
+                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M2 10a8 8 0 018-8v8h8a8 8 0 11-16 0z"></path><path d="M12 2.252A8.001 8.001 0 0117.748 8H12V2.252z"></path></svg>
+                <span class="font-semibold text-sm">Sheet: Master_Ledger.gsheet</span>
+            </div>
+        </div>
+
+        <div class="pt-4">
+            <a href="https://wa.me/message/YOUR_WA_ME_ID" class="block w-full bg-blue-600 text-white font-bold py-4 rounded-2xl shadow-lg shadow-blue-200 hover:bg-blue-700 transition duration-200 transform hover:scale-105 active:scale-95">
+                Go Back to WhatsApp
+            </a>
+            <p class="mt-4 text-xs text-gray-400">
+                Try sending a bill or a sales record now.
+            </p>
+        </div>
+    </div>
+
+    <!-- Celebration Effect Placeholder -->
+    <div class="absolute inset-0 pointer-events-none overflow-hidden select-none opacity-20">
+        <div class="absolute -top-10 -left-10 w-40 h-40 bg-blue-200 rounded-full blur-3xl"></div>
+        <div class="absolute -bottom-10 -right-10 w-40 h-40 bg-green-200 rounded-full blur-3xl"></div>
+    </div>
+</body>
+</html>

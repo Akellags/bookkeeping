@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Onboarding - Help U Bookkeeper</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-50 flex flex-col items-center justify-center min-h-screen p-4">
+    <div class="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 space-y-8">
+        <div class="text-center">
+            <h1 class="text-3xl font-bold text-gray-900">Welcome to Help U</h1>
+            <p class="mt-2 text-gray-600">Complete these steps to start bookkeeping on WhatsApp</p>
+        </div>
+
+        <div class="space-y-6">
+            <!-- Step 1: Link Google -->
+            <div class="flex items-start space-x-4 p-4 border rounded-xl hover:bg-gray-50 transition">
+                <div class="flex-shrink-0 bg-blue-100 text-blue-600 p-2 rounded-lg">
+                    <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M21.35 11.1h-9.17v2.73h6.51c-.33 1.56-1.56 2.73-3.21 2.73-2.02 0-3.65-1.63-3.65-3.65s1.63-3.65 3.65-3.65c.88 0 1.68.32 2.3.84l2.14-2.14C18.41 3.49 16.06 2 13.18 2 7.01 2 2 7.01 2 13.18S7.01 24.35 13.18 24.35c5.94 0 10.9-4.29 11.82-10h-3.65v-3.25z"/></svg>
+                </div>
+                <div class="flex-1">
+                    <h3 class="font-bold text-gray-900">Step 1: Link Google Drive</h3>
+                    <p class="text-sm text-gray-500">All your data stays in your personal Google Drive.</p>
+                    <a href="http://localhost:8000/auth/google" class="mt-3 inline-block bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700 transition">Connect Google</a>
+                </div>
+            </div>
+
+            <!-- Step 2: WhatsApp Connection -->
+            <div class="flex items-start space-x-4 p-4 border rounded-xl opacity-50 cursor-not-allowed">
+                <div class="flex-shrink-0 bg-green-100 text-green-600 p-2 rounded-lg">
+                    <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12.031 2c-5.511 0-9.989 4.478-9.989 9.989 0 1.76.459 3.413 1.264 4.851L2.031 22l5.304-1.391c1.39.756 2.972 1.189 4.696 1.189 5.511 0 9.989-4.478 9.989-9.989S17.542 2 12.031 2zm6.592 14.168c-.271.761-1.35 1.393-1.85 1.488-.491.094-1.127.168-3.078-.541-2.496-.906-4.102-3.447-4.226-3.614-.125-.166-1.021-1.356-1.021-2.585 0-1.229.645-1.833.874-2.083.229-.25.5-.312.667-.312.167 0 .334.004.479.011.154.007.362-.058.567.442.208.508.712 1.734.775 1.859.062.125.104.271.021.438-.083.167-.125.271-.25.417-.125.146-.263.326-.375.438-.125.125-.255.26-.11.508.146.25.647 1.067 1.389 1.728.958.854 1.766 1.119 2.016 1.244.25.125.396.104.542-.062.146-.167.625-.729.792-.979.167-.25.334-.208.562-.125.229.083 1.458.688 1.708.812.25.125.417.188.479.292.062.104.062.604-.209 1.365z"/></svg>
+                </div>
+                <div class="flex-1">
+                    <h3 class="font-bold text-gray-900">Step 2: Start on WhatsApp</h3>
+                    <p class="text-sm text-gray-500">Send "Hi" to the bot to activate your ledger.</p>
+                </div>
+            </div>
+        </div>
+
+        <p class="text-xs text-center text-gray-400">By connecting, you agree to our Terms of Service.</p>
+    </div>
+</body>
+</html>
