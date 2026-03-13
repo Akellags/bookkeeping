@@ -1,88 +1,81 @@
-# GitHub Repository & Team Workflow Guide
+# Help U: Bookkeeping Repository & GitHub Workflow Guide
 
-This guide describes how to initialize the Help U repository, connect it to GitHub, and the standard branching/commit flow for developers.
+This guide describes how to initialize the **Bookkeeping** project repository, connect it to GitHub, and the standard branching/commit flow for developers.
 
 ---
 
-## 🚀 1. Initial Repository Setup (One-Time)
+## 🚀 1. Repository Initialization (Individual Project)
 
-*If you are the project owner and starting the repo for the first time:*
+Each project in the Help U ecosystem (like `bookkeeping`) has its own dedicated GitHub repository. This allows for fine-grained access control and project-specific versioning.
 
-1.  **Initialize Git**: Open your terminal in the root `bookkeeper` directory.
+### Initializing the Repository (One-Time)
+1.  **Navigate to the project directory**:
+    ```cmd
+    cd helpU\bookkeeper
+    ```
+2.  **Initialize Git**:
     ```cmd
     git init
     ```
-2.  **Add Files**: Stage all code and project files (except those ignored by `.gitignore`).
+3.  **Add all files**:
     ```cmd
     git add .
     ```
-3.  **Initial Commit**:
+4.  **Initial Commit**:
     ```cmd
     git commit -m "Initial commit: GSTR-1 compliant backend and multi-tenant web onboarding"
     ```
-4.  **Create GitHub Repo**:
-    - Go to [GitHub](https://github.com/new).
-    - Create a repository named `bookkeeper`.
-    - **Do NOT** initialize with README, license, or gitignore (since we have them locally).
-5.  **Link Local to GitHub**:
-    *(Replace `YOUR_USER_NAME` with your actual GitHub username)*
+5.  **Connect to GitHub**:
     ```cmd
-    git remote add origin https://github.com/YOUR_USER_NAME/bookkeeper.git
+    git remote add origin https://github.com/Akellags/bookkeeping.git
     git branch -M main
     git push -u origin main
     ```
 
 ---
 
-## 🛠️ 2. Developer Workflow (Daily)
+## 🔐 2. Access Management
+- **Project Isolation**: Since each project has its own repo, you can invite developers only to the specific repositories they need.
+- **Settings**: Manage collaborators via **Settings > Collaborators** in the GitHub repository.
 
-### 📥 Cloning the Repo (New Developers)
+---
+
+## 🛠️ 3. Developer Workflow (Daily)
+
+### 📥 Cloning the Project
 ```cmd
-git clone https://github.com/YOUR_USER_NAME/bookkeeper.git
-cd bookkeeper
+git clone https://github.com/Akellags/bookkeeping.git
+cd bookkeeping
 ```
 
-### 🌿 Creating a New Branch
+### 🌿 Feature Branching
 **NEVER** commit directly to `main`. Always create a feature branch.
 ```cmd
-# 1. Start from latest main
-git checkout main
-git pull origin main
+# 1. Update main
+git checkout main && git pull origin main
 
-# 2. Create branch (use naming: feat/, fix/, refactor/)
-git checkout -b feat/your-feature-name
+# 2. Create feature branch
+# Format: feat/<desc> or fix/<desc>
+git checkout -b feat/add-stripe-billing
 ```
 
 ### 💾 Committing & Pushing
 ```cmd
-# Stage changes
 git add .
-
-# Commit with a clear message
-git commit -m "Brief description of changes"
-
-# Push the branch to GitHub
-git push -u origin feat/your-feature-name
+git commit -m "feat: implement stripe checkout session"
+git push -u origin feat/add-stripe-billing
 ```
 
 ---
 
-## 🔄 3. Merging Changes
-
-1.  **Pull Request (PR)**: Go to the GitHub repository page and click **"Compare & pull request"**.
-2.  **Code Review**: Team members review the code and approve.
-3.  **Merge**: Once approved, merge the PR on GitHub.
-4.  **Clean up local**:
-    ```cmd
-    git checkout main
-    git pull origin main
-    git branch -d feat/your-feature-name
-    ```
+## 🔄 4. Merging Changes
+1.  **Pull Request (PR)**: Create a PR on GitHub comparing your feature branch to `main`.
+2.  **Code Review**: At least one other developer must review and approve.
+3.  **Merge**: Once approved and tests pass, merge to `main`.
 
 ---
 
-## ⚠️ 4. Crucial Git Rules
-1.  **DO NOT commit sensitive files**: The `.env` and `.db` files are ignored by `.gitignore`. Never force add them.
-2.  **Run Tests Before Pushing**: Ensure `main.py` starts up without errors.
+## ⚠️ 5. Critical Rules
+1.  **Local Secrets**: Never commit `.env` or local database files. These are ignored by Git.
+2.  **Run Tests**: Ensure the backend starts up correctly before pushing any code.
 3.  **Sync often**: Run `git pull origin main` frequently to avoid merge conflicts.
-4.  **Descriptive Messages**: Use clear, actionable commit messages like `fix: resolve landing page spinner timeout` or `feat: add Stripe webhook for subscription updates`.
