@@ -125,23 +125,24 @@ class WhatsAppOrchestrator:
         if db_user:
             db_user.last_interaction_type = None
             db_user.last_interaction_data = None
+            # Cancel any pending transactions to avoid flow collisions
+            self.db.query(Transaction).filter(
+                Transaction.user_whatsapp_id == user_whatsapp_id,
+                Transaction.status.in_(["PENDING_TYPE", "PENDING_SUBTYPE", "PENDING_CONFIRM"])
+            ).update({"status": "CANCELLED"})
             self.db.commit()
 
         menu_msg = (
             "Hello! 👋 I'm your Help U bookkeeping assistant.\n\n"
-            "How can I help you today? 🚀\n\n"
-            "Commands:\n"
-            "📸 *Send a photo* of any bill to record it.\n"
-            "🎤 *Send a voice note* or text to record a sale (e.g., 'Sold items for 500').\n"
-            "📄 *'Send invoice INV-123'* to get a PDF link.\n"
-            "📊 *'Stats'* to see your monthly totals.\n"
-            "📈 *'Analysis'* for a deep business report.\n"
-            "💡 *'Advice'* to ask me anything about your business.\n"
-            "🧾 *'GSTR1'* to download your monthly JSON report."
+            "How can I help you today? 🚀"
         )
-        logger.info(f"Sending quick greeting/menu to {user_whatsapp_id}")
-        send_whatsapp_text(user_whatsapp_id, menu_msg)
-        return {"status": "quick_response_sent"}
+        logger.info(f"Sending high-level menu to {user_whatsapp_id}")
+        send_whatsapp_interactive(
+            user_whatsapp_id, 
+            menu_msg, 
+            ["💰 Money In", "💸 Money Out", "🛠️ Business Tools"]
+        )
+        return {"status": "main_menu_sent"}
 
     async def _handle_verification(self, user_whatsapp_id: str, text_body: str):
         token = text_body.split("_")[-1].upper() if text_body.upper().startswith("VERIFY_") else text_body.upper()

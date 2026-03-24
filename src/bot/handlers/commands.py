@@ -194,27 +194,79 @@ async def _handle_switch_command(db: Session, user: User):
     return {"status": "switch_menu_sent"}
 
 async def _process_new_transaction(db: Session, user: User, business: Business, text: str):
+    # Check if there's an existing AWAITING_DETAILS transaction
+    tx = db.query(Transaction).filter(
+        Transaction.user_whatsapp_id == user.whatsapp_id,
+        Transaction.status == "AWAITING_DETAILS"
+    ).order_by(Transaction.created_at.desc()).first()
+
     extraction = ai_processor.process_sales_text(text)
     if not extraction or not extraction.get("is_transaction"):
-        # Handle non-transactional messages or greetings not caught by orchestrator
-        send_whatsapp_text(user.whatsapp_id, "I'm not sure how to handle that. Try sending a bill photo or a sale record!")
-        return {"status": "not_a_transaction"}
+        if tx:
+            # If we were awaiting details, maybe this text *is* the detail but AI failed to parse as full tx?
+            send_whatsapp_text(user.whatsapp_id, "I couldn't quite understand that. Please type the details clearly (e.g., 'Sold 500 worth of items').")
+            return {"status": "awaiting_details_retry"}
 
-    # Store as a pending transaction
-    tx = Transaction(
-        id=str(uuid.uuid4()),
-        user_whatsapp_id=user.whatsapp_id,
-        business_id=business.id,
-        transaction_type=extraction.get("transaction_type", "Sale"),
-        extracted_json=extraction,
-        status="PENDING_SUBTYPE"
-    )
-    db.add(tx)
+        # Handle non-transactional messages or greetings not caught by orchestrator
+        # Instead of just saying "not sure", let's offer the main menu
+        send_whatsapp_interactive(
+            user.whatsapp_id,
+            "I'm not sure how to handle that. How can I help you? 🚀",
+            ["💰 Money In", "💸 Money Out", "🛠️ Business Tools"]
+        )
+        return {"status": "main_menu_offered"}
+
+    if tx:
+        # Update existing transaction
+        tx.extracted_json = extraction
+        if extraction.get("transaction_type") and extraction.get("transaction_type") != "PENDING":
+             tx.transaction_type = extraction.get("transaction_type")
+        tx.status = "PENDING_SUBTYPE"
+    else:
+        # Cancel old pending transactions to avoid collisions
+        db.query(Transaction).filter(
+            Transaction.user_whatsapp_id == user.whatsapp_id,
+            Transaction.status.in_(["PENDING_TYPE", "PENDING_SUBTYPE", "PENDING_CONFIRM"])
+        ).update({"status": "CANCELLED"})
+
+        # Store as a new pending transaction
+        tx_type = extraction.get("transaction_type", "Sale")
+        tx = Transaction(
+            id=str(uuid.uuid4()),
+            user_whatsapp_id=user.whatsapp_id,
+            business_id=business.id,
+            transaction_type=tx_type,
+            extracted_json=extraction,
+            status="PENDING_TYPE"
+        )
+        db.add(tx)
+    
     db.commit()
 
-    send_whatsapp_interactive(
-        user.whatsapp_id,
-        f"Is this a B2B {tx.transaction_type} (with GSTIN) or B2C (without GSTIN)?",
-        ["B2B", "B2C"]
-    )
-    return {"status": "awaiting_subtype"}
+    if tx.status == "PENDING_TYPE":
+        # If it was a fresh tx, we ask for the bucket
+        send_whatsapp_interactive(
+            user.whatsapp_id,
+            f"I've detected a possible *{tx.transaction_type}*. Which category does this belong to?",
+            ["💰 Money In", "💸 Money Out", "Cancel"]
+        )
+        return {"status": "awaiting_type_bucket"}
+    else:
+        # If it was AWAITING_DETAILS, it already has a type/bucket context
+        if tx.transaction_type in ["Sale", "Purchase"]:
+            send_whatsapp_interactive(
+                user.whatsapp_id,
+                f"Is this a B2B {tx.transaction_type} (with GSTIN) or B2C (without GSTIN)?",
+                ["B2B", "B2C"]
+            )
+        elif tx.transaction_type == "Payment":
+             send_whatsapp_interactive(
+                user.whatsapp_id,
+                "Is this a One-time (Single) payment or a Recurring payment?",
+                ["Single", "Recurring"]
+            )
+        else:
+             from src.bot.handlers.interactive import _handle_confirmation
+             return await _handle_confirmation(db, user, business, tx, "Initial")
+        
+        return {"status": "awaiting_subtype"}
