@@ -25,7 +25,9 @@ const GSTReports = () => {
   const handleDownload = async () => {
     try {
       setDownloading(true);
-      const whatsappId = localStorage.getItem('whatsapp_id') || '919703333319';
+      const whatsappId = localStorage.getItem('whatsapp_id');
+      const isValidId = whatsappId && whatsappId !== 'null' && whatsappId !== 'undefined';
+      if (!isValidId) return;
       let url = `/api/user/reports/download?whatsapp_id=${whatsappId}`;
       if (dateRange.start) url += `&start_date=${formatDate(dateRange.start)}`;
       if (dateRange.end) url += `&end_date=${formatDate(dateRange.end)}`;
@@ -48,14 +50,22 @@ const GSTReports = () => {
   };
 
   const downloadInvoice = (invoiceNo) => {
-    const whatsappId = localStorage.getItem('whatsapp_id') || '919703333319';
+    const whatsappId = localStorage.getItem('whatsapp_id');
+    const isValidId = whatsappId && whatsappId !== 'null' && whatsappId !== 'undefined';
+    if (!isValidId) return;
     window.open(`/api/user/invoice/pdf?whatsapp_id=${whatsappId}&invoice_no=${invoiceNo}`, '_blank');
   };
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const whatsappId = localStorage.getItem('whatsapp_id') || '919703333319';
+        const whatsappId = localStorage.getItem('whatsapp_id');
+        const isValidId = whatsappId && whatsappId !== 'null' && whatsappId !== 'undefined';
+        if (!isValidId) {
+           setLoading(false);
+           return;
+        }
+        
         let statsUrl = `/api/user/stats?whatsapp_id=${whatsappId}`;
         let reportsUrl = `/api/user/reports?whatsapp_id=${whatsappId}`;
         

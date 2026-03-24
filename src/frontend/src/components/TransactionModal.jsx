@@ -20,11 +20,20 @@ const TransactionModal = ({ isOpen, onClose, onRefresh }) => {
   const [error, setError] = useState(null);
   const fileInputRef = useRef(null);
 
-  const whatsappId = localStorage.getItem('whatsapp_id') || '919703333319';
+  const getWhatsappId = () => {
+    const id = localStorage.getItem('whatsapp_id');
+    return id && id !== 'null' && id !== 'undefined' ? id : null;
+  };
 
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+
+    const whatsappId = getWhatsappId();
+    if (!whatsappId) {
+      setError('Session expired. Please log in again.');
+      return;
+    }
 
     setLoading(true);
     setError(null);
@@ -44,6 +53,11 @@ const TransactionModal = ({ isOpen, onClose, onRefresh }) => {
 
   const handleTextSubmit = async () => {
     if (!text) return;
+    const whatsappId = getWhatsappId();
+    if (!whatsappId) {
+      setError('Session expired. Please log in again.');
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -57,6 +71,11 @@ const TransactionModal = ({ isOpen, onClose, onRefresh }) => {
   };
 
   const handleSave = async () => {
+    const whatsappId = getWhatsappId();
+    if (!whatsappId) {
+      setError('Session expired. Please log in again.');
+      return;
+    }
     setLoading(true);
     try {
       await axios.post(`/api/transactions/save?whatsapp_id=${whatsappId}`, {

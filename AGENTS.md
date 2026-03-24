@@ -11,3 +11,5 @@ For code - all coding should only go into \src
 For testing code - all test code should go into \tests
 For db schema - all database schema related files should be \dbSchema
 If there are no folders available as above, we have to crate them
+Always use virtual environment venv for using pyton or installing new packages for this project
+set PYTHONPATH=. && venv\Scripts\python.exe -m mypy src

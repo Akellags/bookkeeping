@@ -11,6 +11,8 @@ import {
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import axios from 'axios';
 
+const isValidId = (id) => id && id !== 'null' && id !== 'undefined' && id.trim() !== '';
+
 const Layout = ({ children, userStats }) => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -18,23 +20,30 @@ const Layout = ({ children, userStats }) => {
   const [showSwitch, setShowSwitch] = useState(false);
 
   useEffect(() => {
+    const whatsappId = localStorage.getItem('whatsapp_id');
+
+    if (!isValidId(whatsappId) && location.pathname !== '/') {
+      navigate('/');
+      return;
+    }
+
     const fetchBusinesses = async () => {
       try {
-        const whatsappId = localStorage.getItem('whatsapp_id') || '919703333319';
+        if (!isValidId(whatsappId)) return;
         const response = await axios.get(`/api/user/businesses?whatsapp_id=${whatsappId}`);
         setBusinesses(response.data.businesses || []);
       } catch (error) {
         console.error('Error fetching businesses:', error);
       }
     };
-    fetchBusinesses();
-  }, []);
+    if (isValidId(whatsappId)) fetchBusinesses();
+  }, [navigate, location.pathname]);
 
   const handleSwitch = async (businessId) => {
     try {
-      const whatsappId = localStorage.getItem('whatsapp_id') || '919703333319';
+      const whatsappId = localStorage.getItem('whatsapp_id');
       await axios.post(`/api/user/businesses/switch?whatsapp_id=${whatsappId}&business_id=${businessId}`);
-      window.location.reload(); // Refresh to update all stats
+      window.location.reload(); 
     } catch (error) {
       console.error('Switch failed:', error);
     }
@@ -45,7 +54,7 @@ const Layout = ({ children, userStats }) => {
     const gstin = prompt("Enter Business GSTIN:");
     if (name && gstin) {
       try {
-        const whatsappId = localStorage.getItem('whatsapp_id') || '919703333319';
+        const whatsappId = localStorage.getItem('whatsapp_id');
         await axios.post(`/api/user/businesses/add?whatsapp_id=${whatsappId}&business_name=${name}&business_gstin=${gstin}`);
         window.location.reload();
       } catch (error) {
@@ -58,10 +67,11 @@ const Layout = ({ children, userStats }) => {
     try {
       await axios.post('/api/auth/logout');
       localStorage.removeItem('whatsapp_id');
-      navigate('/');
+      window.location.href = '/'; // Force a full reload to clear all states
     } catch (error) {
       console.error('Logout failed:', error);
-      navigate('/');
+      localStorage.removeItem('whatsapp_id');
+      window.location.href = '/';
     }
   };
 

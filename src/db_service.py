@@ -8,6 +8,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+logger = logging.getLogger(__name__)
+
 # Use SQLite for local development, fallback to PostgreSQL in production
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./help_u_bookkeeper.db")
 
@@ -21,8 +23,17 @@ class User(Base):
     google_email = Column(String, unique=True, index=True)
     google_refresh_token = Column(Text)
     active_business_id = Column(String, nullable=True) # ID of current selected business
+    drive_initialized = Column(Boolean, default=False) # True if Google Drive structure is correct
     subscription_status = Column(String, default="FREE_TRIAL")
     created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # State tracking for WhatsApp commands (e.g., AWAITING_EDIT)
+    last_interaction_type = Column(String, nullable=True)
+    last_interaction_data = Column(JSON, nullable=True)
+
+    # Verification Handover for web-onboarded users
+    link_token = Column(String, unique=True, index=True, nullable=True)
+    link_token_expires_at = Column(DateTime, nullable=True)
     
     businesses = relationship("Business", back_populates="user")
 
@@ -51,6 +62,11 @@ class Transaction(Base):
     status = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+class ProcessedMessage(Base):
+    __tablename__ = "processed_messages"
+    message_id = Column(String, primary_key=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 # Create tables
 Base.metadata.create_all(bind=engine)
 
@@ -63,36 +79,71 @@ def get_db():
 
 def save_user_token(whatsapp_id: str, email: str, refresh_token: str):
     db = SessionLocal()
-    # 1. Check if user exists by whatsapp_id
-    user = db.query(User).filter(User.whatsapp_id == whatsapp_id).first()
-    
-    # 2. Check if another user exists with the same email
-    existing_user_by_email = db.query(User).filter(User.google_email == email).first()
-    
-    if existing_user_by_email and existing_user_by_email.whatsapp_id != whatsapp_id:
-        # If email exists with different ID, we link it to the existing record
-        # This prevents the UNIQUE constraint error and merges the account
-        existing_user_by_email.google_refresh_token = refresh_token
-        # If the incoming ID is a "real" whatsapp ID (doesn't start with web_), 
-        # and existing is a "web_" ID, we might want to migrate.
-        # For now, let's just return the existing user's ID to keep consistency.
-        db.commit()
-        actual_user = existing_user_by_email
-    elif user:
-        user.google_refresh_token = refresh_token
-        user.google_email = email
-        db.commit()
-        actual_user = user
-    else:
-        user = User(whatsapp_id=whatsapp_id, google_email=email, google_refresh_token=refresh_token)
-        db.add(user)
-        db.commit()
-        actual_user = user
+    try:
+        # 1. Check if user exists by whatsapp_id
+        user = db.query(User).filter(User.whatsapp_id == whatsapp_id).first()
         
-    # Refresh to get updated state
-    db.refresh(actual_user)
-    db.close()
-    return actual_user
+        # 2. Check if another user exists with the same email
+        existing_user_by_email = db.query(User).filter(User.google_email == email).first()
+        
+        if existing_user_by_email and existing_user_by_email.whatsapp_id != whatsapp_id:
+            # Case: Found account by email, but ID is different (e.g. was 'web_...')
+            # If the new ID is a 'real' ID (not web_) and existing is 'web_', we migrate
+            old_id = existing_user_by_email.whatsapp_id
+            if not whatsapp_id.startswith("web_") and old_id.startswith("web_"):
+                logger.info(f"Migrating web user {old_id} to real WhatsApp ID {whatsapp_id} for email {email}")
+                
+                # 1. If we have a shell user with the target whatsapp_id, delete it first
+                if user:
+                    db.delete(user)
+                    db.commit()
+                
+                # Capture data before deletion
+                captured_active_business_id = existing_user_by_email.active_business_id
+                captured_subscription_status = existing_user_by_email.subscription_status
+                
+                # Delete old web user first to clear the email constraint
+                db.delete(existing_user_by_email)
+                db.commit() # Commit the deletion
+                
+                # Create new user record
+                new_user = User(
+                    whatsapp_id=whatsapp_id,
+                    google_email=email,
+                    google_refresh_token=refresh_token,
+                    active_business_id=captured_active_business_id,
+                    subscription_status=captured_subscription_status
+                )
+                db.add(new_user)
+                
+                # Move businesses and transactions to the new ID
+                db.query(Business).filter(Business.user_whatsapp_id == old_id).update({"user_whatsapp_id": whatsapp_id})
+                db.query(Transaction).filter(Transaction.user_whatsapp_id == old_id).update({"user_whatsapp_id": whatsapp_id})
+                
+                db.commit()
+                db.refresh(new_user)
+                return new_user
+            else:
+                # Just update the token
+                existing_user_by_email.google_refresh_token = refresh_token
+                db.commit()
+                db.refresh(existing_user_by_email)
+                return existing_user_by_email
+                
+        elif user:
+            user.google_refresh_token = refresh_token
+            user.google_email = email
+            db.commit()
+            db.refresh(user)
+            return user
+        else:
+            user = User(whatsapp_id=whatsapp_id, google_email=email, google_refresh_token=refresh_token)
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            return user
+    finally:
+        db.close()
 
 def get_user(whatsapp_id: str):
     db = SessionLocal()

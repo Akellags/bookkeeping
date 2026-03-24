@@ -7,7 +7,8 @@ import {
   ExternalLink,
   Save,
   Loader2,
-  Database
+  Database,
+  MessageCircle
 } from 'lucide-react';
 import Layout from '../components/Layout';
 
@@ -15,15 +16,24 @@ const Settings = () => {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [linkToken, setLinkToken] = useState(null);
+  const [generatingToken, setGeneratingToken] = useState(false);
   const [formData, setFormData] = useState({
     business_name: '',
     business_gstin: ''
   });
 
+  const whatsappId = localStorage.getItem('whatsapp_id');
+  const isValidId = whatsappId && whatsappId !== 'null' && whatsappId !== 'undefined';
+  const botNumber = import.meta.env.VITE_WHATSAPP_BOT_NUMBER || "919000000000";
+
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        const whatsappId = localStorage.getItem('whatsapp_id') || '919703333319';
+        if (!isValidId) {
+          setLoading(false);
+          return;
+        }
         const response = await axios.get(`/api/user/stats?whatsapp_id=${whatsappId}`);
         setStats(response.data);
         setFormData({
@@ -37,12 +47,12 @@ const Settings = () => {
       }
     };
     fetchStats();
-  }, []);
+  }, [whatsappId, isValidId]);
 
   const handleSave = async () => {
     try {
+      if (!isValidId) return;
       setSaving(true);
-      const whatsappId = localStorage.getItem('whatsapp_id') || '919703333319';
       await axios.post(`/api/user/settings?whatsapp_id=${whatsappId}`, formData);
       alert('Settings updated successfully!');
     } catch (error) {
@@ -50,6 +60,28 @@ const Settings = () => {
       alert('Failed to save settings.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleGenerateToken = async () => {
+    try {
+      if (!isValidId) return;
+      setGeneratingToken(true);
+      const response = await axios.post(`/api/user/generate-link-token?whatsapp_id=${whatsappId}`);
+      setLinkToken(response.data.link_token);
+    } catch (error) {
+      console.error('Failed to generate token:', error);
+      alert('Failed to generate link token. Please try again.');
+    } finally {
+      setGeneratingToken(false);
+    }
+  };
+
+  const handleWhatsAppLink = () => {
+    if (linkToken) {
+      const message = `VERIFY_${linkToken}`;
+      const url = `https://wa.me/${botNumber}?text=${encodeURIComponent(message)}`;
+      window.open(url, '_blank');
     }
   };
 
@@ -64,6 +96,59 @@ const Settings = () => {
   return (
     <Layout userStats={stats}>
       <div className="max-w-4xl space-y-8">
+        {/* WhatsApp Linking Section (Only for web users) */}
+        {whatsappId && whatsappId.startsWith('web_') && (
+          <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-2xl p-8 border border-green-100 shadow-sm relative overflow-hidden">
+            <div className="absolute top-0 right-0 p-8 opacity-10 text-green-600">
+              <MessageCircle size={120} />
+            </div>
+            
+            <div className="relative z-10 space-y-6">
+              <div className="space-y-2">
+                <h3 className="text-2xl font-bold text-green-900">Connect to WhatsApp Bot</h3>
+                <p className="text-green-700 font-medium max-w-lg">
+                  Link your WhatsApp account to start recording transactions via chat, snap photos of bills, and receive monthly GSTR-1 reminders.
+                </p>
+              </div>
+
+              {!linkToken ? (
+                <button
+                  onClick={handleGenerateToken}
+                  disabled={generatingToken}
+                  className="flex items-center space-x-2 bg-green-600 text-white px-8 py-4 rounded-xl font-bold shadow-lg shadow-green-200 hover:bg-green-700 transition transform hover:scale-105 disabled:opacity-50"
+                >
+                  {generatingToken ? <Loader2 className="animate-spin" size={20} /> : <MessageCircle size={20} />}
+                  <span>Generate Magic Link</span>
+                </button>
+              ) : (
+                <div className="space-y-4">
+                  <div className="bg-white/60 backdrop-blur-sm p-4 rounded-xl border border-green-200 inline-block">
+                    <p className="text-xs font-bold text-green-600 uppercase tracking-wider mb-1">Your Verification Code</p>
+                    <p className="text-3xl font-mono font-black text-green-900 tracking-widest">{linkToken}</p>
+                  </div>
+                  
+                  <div className="flex flex-col sm:flex-row gap-4">
+                    <button
+                      onClick={handleWhatsAppLink}
+                      className="flex items-center justify-center space-x-2 bg-green-600 text-white px-8 py-4 rounded-xl font-bold shadow-lg shadow-green-200 hover:bg-green-700 transition transform hover:scale-105"
+                    >
+                      <ExternalLink size={20} />
+                      <span>Connect WhatsApp Now</span>
+                    </button>
+                    <button
+                      onClick={() => setLinkToken(null)}
+                      className="text-green-700 font-bold px-6 py-4"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-green-600 font-bold uppercase italic">Valid for 30 minutes • Single use only</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Business Profile */}
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-8">
           <div className="flex items-center space-x-3 mb-6">

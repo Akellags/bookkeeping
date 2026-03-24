@@ -1,6 +1,5 @@
 import os
 import logging
-from faster_whisper import WhisperModel
 from pydub import AudioSegment
 
 logger = logging.getLogger(__name__)
@@ -15,7 +14,9 @@ class TranscriptionService:
     @property
     def model(self):
         if TranscriptionService._model is None:
+            # Lazy load the model and imports to speed up server startup
             logger.info(f"Loading Whisper model ({self.model_size}) on local CPU (first use)...")
+            from faster_whisper import WhisperModel
             TranscriptionService._model = WhisperModel(self.model_size, device="cpu", compute_type="int8")
             logger.info("Whisper model loaded successfully.")
         return TranscriptionService._model

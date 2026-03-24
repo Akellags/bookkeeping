@@ -1,10 +1,52 @@
-INFO:     2401:4900:1c27:8af5:7cf8:cb1c:c09b:5f64:0 - "POST /api/transactions/process-text?whatsapp_id=web_f27a9842a48f&text=Sold%20100%20masks%20at%20rs.%2020%20each%20with%2012%%20GST HTTP/1.1" 200 OK
-INFO:src.main:Saving transaction for user: web_f27a9842a48f
-INFO:src.main:Extraction to save: {'transaction_type': 'Sale', 'invoice_no': '1', 'date': 'N/A', 'vendor_name': 'N/A', 'vendor_gstin': 'N/A', 'recipient_gstin': 'N/A', 'place_of_supply': 'N/A', 'reverse_charge': 'N', 'hsn_code': '6307', 'hsn_description': 'Masks', 'uqc': 'NOS', 'quantity': 100, 'taxable_value': 2000, 'gst_rate': 12, 'cgst': 120, 'sgst': 120, 'igst': 0, 'total_amount': 2240}INFO:googleapiclient.discovery_cache:file_cache is only supported with oauth2client<4.0.0
-INFO:googleapiclient.discovery_cache:file_cache is only supported with oauth2client<4.0.0
-INFO:googleapiclient.discovery_cache:file_cache is only supported with oauth2client<4.0.0
-WARNING:googleapiclient.http:Encountered 403 Forbidden with reason "PERMISSION_DENIED"
-ERROR:src.main:Error saving transaction: <HttpError 403 when requesting https://docs.googleapis.com/v1/documents/1KtTCrhsLBPW7ebPjLmzTJMK923wo59nNv_VEK4e4IcY:batchUpdate?alt=json returned "Google Docs API has not been used in project 486079244466 before or it is disabled. Enable it by visiting https://console.developers.google.com/apis/api/docs.googleapis.com/overview?project=486079244466 then retry. If you enabled this API recently, wait a few minutes for the action to propagate to our systems and retry.". Details: "[{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'SERVICE_DISABLED', 'domain': 'googleapis.com', 'metadata': {'containerInfo': '486079244466', 'service': 'docs.googleapis.com', 'activationUrl': 'https://console.developers.google.com/apis/api/docs.googleapis.com/overview?project=486079244466', 'serviceTitle': 'Google Docs API', 'consumer': 'projects/486079244466'}}, {'@type': 
-'type.googleapis.com/google.rpc.LocalizedMessage', 'locale': 'en-US', 'message': 'Google Docs API has not been used in project 486079244466 before or it is disabled. Enable it by visiting https://console.developers.google.com/apis/api/docs.googleapis.com/overview?project=486079244466 then retry. If you enabled this API recently, wait a few minutes for the action to propagate to our systems 
-and retry.'}, {'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Google developers console API activation', 'url': 'https://console.developers.google.com/apis/api/docs.googleapis.com/overview?project=486079244466'}]}]">
-INFO:     2401:4900:1c27:8af5:7cf8:cb1c:c09b:5f64:0 - "POST /api/transactions/save?whatsapp_id=web_f27a9842a48f HTTP/1.1" 500 Internal Server Error
+2026-03-24 13:44:40 - uvicorn.access - INFO - 2401:4900:1cb5:8d7a:cdc9:95ab:7c1e:b241:0 - "GET /api/user/stats?whatsapp_id=919000521868 HTTP/1.1" 500
+2026-03-24 13:44:40 - uvicorn.error - ERROR - Exception in ASGI application
+Traceback (most recent call last):
+  File "C:\Users\ALIENWARE\Projects\helpU\bookkeeper\venv\Lib\site-packages\uvicorn\protocols\http\h11_impl.py", line 410, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ALIENWARE\Projects\helpU\bookkeeper\venv\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ALIENWARE\Projects\helpU\bookkeeper\venv\Lib\site-packages\fastapi\applications.py", line 1160, in __call__   
+    await super().__call__(scope, receive, send)
+  File "C:\Users\ALIENWARE\Projects\helpU\bookkeeper\venv\Lib\site-packages\starlette\applications.py", line 107, in __call__  
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\ALIENWARE\Projects\helpU\bookkeeper\venv\Lib\site-packages\starlette\middleware\errors.py", line 186, in __call__
+    raise exc
+  File "C:\Users\ALIENWARE\Projects\helpU\bookkeeper\venv\Lib\site-packages\starlette\middleware\errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "C:\Users\ALIENWARE\Projects\helpU\bookkeeper\venv\Lib\site-packages\starlette\middleware\exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "C:\Users\ALIENWARE\Projects\helpU\bookkeeper\venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\ALIENWARE\Projects\helpU\bookkeeper\venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\ALIENWARE\Projects\helpU\bookkeeper\venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py", line 18, in 
+__call__
+    await self.app(scope, receive, send)
+  File "C:\Users\ALIENWARE\Projects\helpU\bookkeeper\venv\Lib\site-packages\starlette\routing.py", line 716, in __call__       
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\ALIENWARE\Projects\helpU\bookkeeper\venv\Lib\site-packages\starlette\routing.py", line 736, in app
+    await route.handle(scope, receive, send)
+  File "C:\Users\ALIENWARE\Projects\helpU\bookkeeper\venv\Lib\site-packages\starlette\routing.py", line 290, in handle
+    await self.app(scope, receive, send)
+  File "C:\Users\ALIENWARE\Projects\helpU\bookkeeper\venv\Lib\site-packages\fastapi\routing.py", line 119, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "C:\Users\ALIENWARE\Projects\helpU\bookkeeper\venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\ALIENWARE\Projects\helpU\bookkeeper\venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\ALIENWARE\Projects\helpU\bookkeeper\venv\Lib\site-packages\fastapi\routing.py", line 105, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\ALIENWARE\Projects\helpU\bookkeeper\venv\Lib\site-packages\fastapi\routing.py", line 431, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ALIENWARE\Projects\helpU\bookkeeper\venv\Lib\site-packages\fastapi\routing.py", line 313, in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ALIENWARE\Projects\helpU\bookkeeper\src\api\frontend.py", line 58, in get_user_stats
+    "bills": ledger_stats["count"],
+             ~~~~~~~~~~~~^^^^^^^^^
+KeyError: 'count'
+2026-03-24 13:44:41 - uvicorn.access - INFO - 2401:4900:1cb5:8d7a:cdc9:95ab:7c1e:b241:0 - "GET /api/user/businesses?whatsapp_id=919000521868 HTTP/1.1" 200

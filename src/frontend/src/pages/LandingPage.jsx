@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { 
   MessageCircle, 
   ShieldCheck, 
@@ -11,13 +12,17 @@ import {
   ArrowRight
 } from 'lucide-react';
 
+const isValidId = (id) => id && id !== 'null' && id !== 'undefined' && id.trim() !== '';
+
 const LandingPage = () => {
   const [isRegistered, setIsRegistered] = useState(false);
 
   useEffect(() => {
     const whatsappId = localStorage.getItem('whatsapp_id');
-    if (whatsappId) {
+    if (isValidId(whatsappId)) {
       setIsRegistered(true);
+    } else {
+      setIsRegistered(false);
     }
   }, []);
 
@@ -36,12 +41,12 @@ const LandingPage = () => {
         </div>
         <div className="flex items-center space-x-4">
           {isRegistered ? (
-            <a href="/dashboard" className="bg-blue-600 text-white px-6 py-3 rounded-xl text-sm font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 transition transform hover:scale-105 active:scale-95">
+            <Link to="/dashboard" className="bg-blue-600 text-white px-6 py-3 rounded-xl text-sm font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 transition transform hover:scale-105 active:scale-95">
               Dashboard
-            </a>
+            </Link>
           ) : (
             <>
-              <a href="/dashboard" className="text-sm font-bold text-gray-700 hover:text-blue-600 transition">Sign In</a>
+              <a href="/auth/google?whatsapp_id=new_user" className="text-sm font-bold text-gray-700 hover:text-blue-600 transition">Sign In</a>
               <a href="/auth/google?whatsapp_id=new_user" className="bg-blue-600 text-white px-6 py-3 rounded-xl text-sm font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 transition transform hover:scale-105 active:scale-95">
                 Sign Up
               </a>
@@ -64,10 +69,17 @@ const LandingPage = () => {
             Stop manually entering bills. Photo, Voice, or Text—let AI handle your GSTR-1 compliance, PDF invoices, and Google Drive storage instantly.
           </p>
           <div className="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4">
-            <a href={isRegistered ? "/dashboard" : "/auth/google?whatsapp_id=new_user"} className="flex items-center justify-center space-x-2 bg-blue-600 text-white px-8 py-5 rounded-2xl text-lg font-bold shadow-xl shadow-blue-200 hover:bg-blue-700 transition transform hover:scale-105">
-              <span>{isRegistered ? "Open Dashboard" : "Try Help U Now"}</span>
-              <ArrowRight size={20} />
-            </a>
+            {isRegistered ? (
+              <Link to="/dashboard" className="flex items-center justify-center space-x-2 bg-blue-600 text-white px-8 py-5 rounded-2xl text-lg font-bold shadow-xl shadow-blue-200 hover:bg-blue-700 transition transform hover:scale-105">
+                <span>Open Dashboard</span>
+                <ArrowRight size={20} />
+              </Link>
+            ) : (
+              <a href="/auth/google?whatsapp_id=new_user" className="flex items-center justify-center space-x-2 bg-blue-600 text-white px-8 py-5 rounded-2xl text-lg font-bold shadow-xl shadow-blue-200 hover:bg-blue-700 transition transform hover:scale-105">
+                <span>Try Help U Now</span>
+                <ArrowRight size={20} />
+              </a>
+            )}
             <div className="flex items-center space-x-3 text-gray-400 font-medium px-4">
               <ShieldCheck className="text-green-500" />
               <span className="text-sm">GST Portal Ready JSON</span>
@@ -203,10 +215,10 @@ const LandingPage = () => {
               ))}
             </ul>
             <div className="pt-4">
-              <a href="/reports" className="text-blue-600 font-bold flex items-center space-x-2 group">
+              <Link to="/reports" className="text-blue-600 font-bold flex items-center space-x-2 group">
                 <span>View GST Reports Dashboard</span>
                 <ArrowRight size={18} className="group-hover:translate-x-1 transition" />
-              </a>
+              </Link>
             </div>
           </div>
           <div className="bg-gradient-to-br from-gray-900 to-blue-900 p-8 rounded-[2.5rem] shadow-2xl border border-gray-800 text-white">

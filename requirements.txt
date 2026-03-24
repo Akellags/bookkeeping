@@ -15,3 +15,6 @@ psycopg2-binary
 sqlalchemy
 apscheduler
 python-multipart
+pyjwt 
+tenacity
+python-dateutil

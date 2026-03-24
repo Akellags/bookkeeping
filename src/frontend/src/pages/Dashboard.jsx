@@ -9,6 +9,8 @@ import {
 import Layout from '../components/Layout';
 import TransactionModal from '../components/TransactionModal';
 
+const isValidId = (id) => id && id !== 'null' && id !== 'undefined' && id.trim() !== '';
+
 const Dashboard = () => {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -17,7 +19,13 @@ const Dashboard = () => {
 
   const fetchStats = async () => {
     try {
-      const whatsappId = localStorage.getItem('whatsapp_id') || '919703333319';
+      const whatsappId = localStorage.getItem('whatsapp_id');
+      
+      if (!isValidId(whatsappId)) {
+        setLoading(false);
+        return;
+      }
+
       let url = `/api/user/stats?whatsapp_id=${whatsappId}`;
       if (dateRange.start) url += `&start_date=${formatDate(dateRange.start)}`;
       if (dateRange.end) url += `&end_date=${formatDate(dateRange.end)}`;
@@ -47,7 +55,7 @@ const Dashboard = () => {
     );
   }
 
-  const userStats = stats || { bills: 0, sales: 0, purchases: 0 };
+  const userStats = stats || { bills: 0, sales: 0, purchases: 0, payments: 0, expenses: 0, expenses_paid: 0, expenses_unpaid: 0 };
 
   return (
     <Layout userStats={userStats}>
@@ -98,18 +106,30 @@ const Dashboard = () => {
         />
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6 mb-10">
           <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition">
             <p className="text-gray-400 text-sm font-medium mb-1">Bills Processed</p>
             <p className="text-3xl font-bold text-gray-900">{userStats.bills}</p>
           </div>
           <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition">
             <p className="text-gray-400 text-sm font-medium mb-1">Total Sales</p>
-            <p className="text-3xl font-bold text-gray-900">₹{userStats.sales.toLocaleString()}</p>
+            <p className="text-2xl font-bold text-gray-900">₹{(userStats.sales || 0).toLocaleString()}</p>
           </div>
           <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition">
             <p className="text-gray-400 text-sm font-medium mb-1">Total Purchases</p>
-            <p className="text-3xl font-bold text-gray-900">₹{userStats.purchases.toLocaleString()}</p>
+            <p className="text-2xl font-bold text-gray-900">₹{(userStats.purchases || 0).toLocaleString()}</p>
+          </div>
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition">
+            <p className="text-gray-400 text-sm font-medium mb-1">Total Payments</p>
+            <p className="text-2xl font-bold text-gray-900">₹{(userStats.payments || 0).toLocaleString()}</p>
+          </div>
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition relative overflow-hidden">
+            <p className="text-gray-400 text-sm font-medium mb-1">Total Expenses</p>
+            <p className="text-2xl font-bold text-gray-900 mb-2">₹{(userStats.expenses || 0).toLocaleString()}</p>
+            <div className="flex gap-2 text-[10px] font-bold uppercase">
+              <span className="text-green-600 bg-green-50 px-1.5 py-0.5 rounded">Paid: ₹{(userStats.expenses_paid || 0).toLocaleString()}</span>
+              <span className="text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded">Credit: ₹{(userStats.expenses_unpaid || 0).toLocaleString()}</span>
+            </div>
           </div>
         </div>
 

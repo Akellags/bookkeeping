@@ -1,17 +1,28 @@
 import React, { useEffect } from 'react';
-import { CheckCircle2, Folder, Table, ArrowRight, LayoutDashboard } from 'lucide-react';
+import { CheckCircle2, Folder, Table, ArrowRight, LayoutDashboard, MessageCircle } from 'lucide-react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 
 const OnboardingSuccess = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const whatsappId = searchParams.get('whatsapp_id');
+  const linkToken = searchParams.get('link_token');
+
+  const botNumber = import.meta.env.VITE_WHATSAPP_BOT_NUMBER || "919000000000";
 
   useEffect(() => {
-    if (whatsappId) {
+    if (whatsappId && whatsappId !== 'null' && whatsappId !== 'undefined') {
       localStorage.setItem('whatsapp_id', whatsappId);
     }
   }, [whatsappId]);
+
+  const handleWhatsAppLink = () => {
+    if (linkToken) {
+      const message = linkToken; // Just send the 6-digit hex code
+      const url = `https://wa.me/${botNumber}?text=${encodeURIComponent(message)}`;
+      window.open(url, '_blank');
+    }
+  };
 
   return (
     <div className="bg-gray-50 flex flex-col items-center justify-center min-h-screen p-4 text-center font-inter">
@@ -46,6 +57,24 @@ const OnboardingSuccess = () => {
         </div>
 
         <div className="pt-4 space-y-4">
+          {whatsappId && whatsappId.startsWith('web_') && linkToken && (
+             <div className="bg-green-50 rounded-2xl p-6 border border-green-100 space-y-4">
+                <p className="text-sm font-bold text-green-800">Final Step: Link your WhatsApp</p>
+                <div className="bg-white rounded-xl p-3 border-2 border-dashed border-green-200">
+                  <p className="text-[10px] text-green-500 uppercase tracking-widest font-bold">Your Link Code</p>
+                  <p className="text-2xl font-mono font-black text-green-700">{linkToken}</p>
+                </div>
+                <p className="text-xs text-green-600">Click below to connect your WhatsApp account. If it doesn't open, just message the code <strong>{linkToken}</strong> to our bot.</p>
+                <button 
+                  onClick={handleWhatsAppLink}
+                  className="flex items-center justify-center space-x-2 w-full bg-green-600 text-white font-bold py-4 rounded-2xl shadow-lg shadow-green-200 hover:bg-green-700 transition duration-200 transform hover:scale-105"
+                >
+                  <MessageCircle size={20} />
+                  <span>Connect WhatsApp Bot</span>
+                </button>
+             </div>
+          )}
+
           <button 
             onClick={() => navigate('/dashboard')}
             className="flex items-center justify-center space-x-2 w-full bg-blue-600 text-white font-bold py-4 rounded-2xl shadow-lg shadow-blue-200 hover:bg-blue-700 transition duration-200 transform hover:scale-105 active:scale-95"
@@ -60,7 +89,7 @@ const OnboardingSuccess = () => {
             </p>
             {whatsappId && whatsappId.startsWith('web_') && (
               <p className="text-[10px] text-gray-300">
-                Web ID: {whatsappId}
+                Web ID: {whatsappId} | Token: {linkToken}
               </p>
             )}
           </div>
