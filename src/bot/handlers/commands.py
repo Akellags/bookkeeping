@@ -58,7 +58,10 @@ async def handle_command(db: Session, user: User, business: Business, message_da
 
     # 2. General Commands
     text_lower = text.lower()
-    if text_lower == "analysis" and business:
+    if text_lower == "stats" and business:
+        return await _handle_stats_command(user, business)
+    
+    elif text_lower == "analysis" and business:
         return await _handle_analysis_command(user, business)
     
     elif text_lower == "advice":
@@ -164,6 +167,24 @@ async def _handle_awaiting_edit(db: Session, user: User, business: Business, tex
         return {"status": "edit_completed"}
     return None
 
+async def _handle_stats_command(user: User, business: Business):
+    gs = GoogleService(user.google_refresh_token)
+    summary = gs.get_business_summary(business.master_ledger_sheet_id)
+    if not summary:
+        send_whatsapp_text(user.whatsapp_id, "I don't have enough data yet to show stats.")
+        return {"status": "no_data"}
+    
+    msg = (
+        f"📊 *Monthly Stats for {business.business_name}*\n\n"
+        f"💰 Total Sales: ₹{summary.get('total_sales', 0):,.2f}\n"
+        f"💸 Total Purchases: ₹{summary.get('total_purchases', 0):,.2f}\n"
+        f"🏠 Total Expenses: ₹{summary.get('total_expenses', 0):,.2f}\n"
+        f"💳 Total Payments: ₹{summary.get('total_payments', 0):,.2f}\n\n"
+        "Keep up the good work! 🚀"
+    )
+    send_whatsapp_text(user.whatsapp_id, msg)
+    return {"status": "stats_sent"}
+
 async def _handle_analysis_command(user: User, business: Business):
     gs = GoogleService(user.google_refresh_token)
     summary = gs.get_business_summary(business.master_ledger_sheet_id)
@@ -221,7 +242,11 @@ async def _process_new_transaction(db: Session, user: User, business: Business, 
         tx.extracted_json = extraction
         if extraction.get("transaction_type") and extraction.get("transaction_type") != "PENDING":
              tx.transaction_type = extraction.get("transaction_type")
-        tx.status = "PENDING_SUBTYPE"
+        
+        if tx.transaction_type == "Expense":
+             tx.status = "PENDING_CONFIRM"
+        else:
+             tx.status = "PENDING_SUBTYPE"
     else:
         # Cancel old pending transactions to avoid collisions
         db.query(Transaction).filter(
@@ -259,14 +284,14 @@ async def _process_new_transaction(db: Session, user: User, business: Business, 
                 f"Is this a B2B {tx.transaction_type} (with GSTIN) or B2C (without GSTIN)?",
                 ["B2B", "B2C"]
             )
+            return {"status": "awaiting_subtype"}
         elif tx.transaction_type == "Payment":
              send_whatsapp_interactive(
                 user.whatsapp_id,
                 "Is this a One-time (Single) payment or a Recurring payment?",
                 ["Single", "Recurring"]
             )
+             return {"status": "awaiting_subtype"}
         else:
              from src.bot.handlers.interactive import _handle_confirmation
              return await _handle_confirmation(db, user, business, tx, "Initial")
-        
-        return {"status": "awaiting_subtype"}

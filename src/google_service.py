@@ -339,14 +339,25 @@ class GoogleService:
     @google_retry
     def append_to_master_ledger(self, sheet_id: str, row_data: list, sheet_name: str = "Sales"):
         """Appends a new transaction row to the Master Ledger Google Sheet using requests for stability"""
+        start_time = time.time()
         resolved_name = self._resolve_sheet_name(sheet_id, sheet_name)
-        range_name = f"'{resolved_name}'!A:U"
+        resolve_done = time.time()
         
+        range_name = f"'{resolved_name}'!A:U"
         url = f"https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}/values/{range_name}:append"
         params = {"valueInputOption": "USER_ENTERED"}
         body = {"values": [row_data]}
         
-        return self._execute_with_requests("POST", url, body=body, params=params)
+        result = self._execute_with_requests("POST", url, body=body, params=params)
+        end_time = time.time()
+        
+        duration = end_time - start_time
+        resolve_duration = resolve_done - start_time
+        append_duration = end_time - resolve_done
+        
+        print(f"  [TIMER] Google Sheet Append ({sheet_name}): Total {duration:.2f}s (Resolve: {resolve_duration:.2f}s, Append: {append_duration:.2f}s)")
+        
+        return result
 
     @google_retry
     def update_ledger_row(self, sheet_id: str, row_index: int, row_data: list, sheet_name: str = "Sales"):

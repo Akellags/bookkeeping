@@ -2,6 +2,7 @@ import os
 import logging
 import uuid
 import base64
+import time
 from datetime import datetime
 from sqlalchemy.orm import Session
 from src.db_service import User, Business, Transaction
@@ -88,7 +89,7 @@ async def handle_interactive(db: Session, user: User, business: Business, messag
     elif tx.status == "PENDING_CONFIRM":
         return await _handle_confirmation(db, user, business, tx, button_title)
 
-    return {"status": "unhandled_interactive"}
+    return {"status": "invalid_subtype"}
 
 async def _handle_payment_status(db: Session, user: User, business: Business, status: str):
     data = user.last_interaction_data
@@ -100,28 +101,31 @@ async def _handle_payment_status(db: Session, user: User, business: Business, st
     old_row = data.get("old_row")
     
     if not row_index or not old_row:
-        send_whatsapp_text(user.whatsapp_id, "Invalid transaction data. Please try again.")
-        return {"status": "error_invalid_data"}
+        send_whatsapp_text(user.whatsapp_id, "Could not update payment status in Google Sheets. (Missing row reference)")
+        return {"status": "error_missing_ref"}
+
+    try:
+        gs = GoogleService(user.google_refresh_token)
+        new_row = list(old_row)
+        # 19 is status, 20 is due_date
+        new_row[19] = status 
+        
+        if status == "Paid":
+            new_row[20] = "N/A"
+            gs.update_ledger_row(business.master_ledger_sheet_id, row_index, new_row)
+            send_whatsapp_text(user.whatsapp_id, "✅ Marked as Paid!")
+        else:
+            # For Credit, we need a Due Date
+            user.last_interaction_type = "AWAITING_DUE_DATE"
+            user.last_interaction_data = {"row_index": row_index, "row": new_row}
+            send_whatsapp_text(user.whatsapp_id, "Please enter the *Due Date* for this payment (e.g., '10th April' or 'In 5 days'):")
     
-    gs = GoogleService(user.google_refresh_token)
-    new_row = list(old_row)
-    
-    if status == "Paid":
-        new_row[19] = "Paid"
-        new_row[20] = "N/A"
-        gs.update_ledger_row(business.master_ledger_sheet_id, row_index, new_row)
-        send_whatsapp_text(user.whatsapp_id, "✅ Marked as Paid!")
-        user.last_interaction_type = None
-        user.last_interaction_data = None
-    else:
-        new_row[19] = "Unpaid"
-        gs.update_ledger_row(business.master_ledger_sheet_id, row_index, new_row)
-        user.last_interaction_type = "AWAITING_DUEDATE"
-        user.last_interaction_data = {"row_index": row_index, "old_row": new_row}
-        send_whatsapp_text(user.whatsapp_id, "Please enter the *Due Date* for this payment (e.g., '10th April' or 'In 5 days'):")
-    
-    db.commit()
-    return {"status": "payment_handled"}
+        db.commit()
+        return {"status": "payment_handled"}
+    except Exception as e:
+        logger.error(f"Error updating payment status: {e}")
+        send_whatsapp_text(user.whatsapp_id, "Failed to update Google Sheet status.")
+        return {"status": "error"}
 
 async def _handle_cancel(db: Session, tx: Transaction):
     tx.status = "CANCELLED"
@@ -137,6 +141,10 @@ async def _handle_type_selection(db: Session, user: User, business: Business, tx
     if "money in" in btn_clean:
         tx.status = "PENDING_TYPE"
         db.commit()
+        # Optimization: If we already know the type (from text), skip the sub-menu
+        if tx.transaction_type in ["Sale", "Payment"]:
+             return await _handle_type_selection(db, user, business, tx, tx.transaction_type if tx.transaction_type != "Payment" else "Payment Received")
+
         send_whatsapp_interactive(
             user.whatsapp_id,
             "Select transaction type for Money In:",
@@ -147,6 +155,11 @@ async def _handle_type_selection(db: Session, user: User, business: Business, tx
     elif "money out" in btn_clean:
         tx.status = "PENDING_TYPE"
         db.commit()
+        # Optimization: If we already know the type (from text), skip the sub-menu
+        if tx.transaction_type in ["Purchase", "Expense", "Payment"]:
+             btn_map = {"Purchase": "Purchase", "Expense": "Expense", "Payment": "Payment Made"}
+             return await _handle_type_selection(db, user, business, tx, btn_map.get(tx.transaction_type, "Expense"))
+
         send_whatsapp_interactive(
             user.whatsapp_id,
             "Select transaction type for Money Out:",
@@ -156,7 +169,6 @@ async def _handle_type_selection(db: Session, user: User, business: Business, tx
 
     elif "business tools" in btn_clean:
         # Business tools are usually list menus or specific commands
-        # For now, let's show a list or just text
         send_whatsapp_text(
             user.whatsapp_id,
             "🛠️ *Business Tools*\n\n"
@@ -209,10 +221,11 @@ async def _handle_type_selection(db: Session, user: User, business: Business, tx
         tx.extracted_json["payment_direction"] = "In" if button_title == "Payment Received" else "Out"
         
         # Check if we have extraction data
-        if "total_amount" not in tx.extracted_json:
+        if not tx.extracted_json or "total_amount" not in tx.extracted_json:
             tx.status = "AWAITING_DETAILS"
             db.commit()
-            send_whatsapp_text(user.whatsapp_id, f"Great! Please send the details for this {button_title} (e.g., 'Received 1000 from Customer').")
+            prompt = "received from Customer" if button_title == "Payment Received" else "made to Vendor"
+            send_whatsapp_text(user.whatsapp_id, f"Great! Please send the details for this {button_title} (e.g., '{button_title.split()[0]} 1000 {prompt}').")
             return {"status": "awaiting_details"}
 
         tx.status = "PENDING_SUBTYPE"
@@ -222,25 +235,24 @@ async def _handle_type_selection(db: Session, user: User, business: Business, tx
             "Is this a One-time (Single) payment or a Recurring payment?",
             ["Single", "Recurring"]
         )
-        return {"status": "awaiting_payment_subtype"}
-    
-    elif button_title == "Convert to PDF":
-        return await _handle_pdf_conversion(db, user, business, tx)
+        return {"status": "awaiting_subtype"}
 
     return {"status": "invalid_type"}
 
 async def _handle_subtype_selection(db: Session, user: User, business: Business, tx: Transaction, button_title: str):
     if button_title in ["B2B", "B2C"]:
+        ext = dict(tx.extracted_json or {})
+        ext["is_b2b"] = (button_title == "B2B")
+        tx.extracted_json = ext
         tx.status = "PENDING_CONFIRM"
-        if not tx.extracted_json: tx.extracted_json = {}
-        tx.extracted_json["is_b2b"] = (button_title == "B2B")
         db.commit()
         return await _handle_confirmation(db, user, business, tx, "Initial")
-    
+        
     elif button_title in ["Single", "Recurring"]:
-        if not tx.extracted_json: tx.extracted_json = {}
-        tx.extracted_json["payment_type"] = button_title
+        ext = dict(tx.extracted_json or {})
+        ext["payment_type"] = button_title
         if button_title == "Recurring":
+            tx.extracted_json = ext
             send_whatsapp_interactive(
                 user.whatsapp_id,
                 "What is the frequency of this recurring payment?",
@@ -249,14 +261,16 @@ async def _handle_subtype_selection(db: Session, user: User, business: Business,
             db.commit()
             return {"status": "awaiting_frequency"}
         else:
-            tx.extracted_json["payment_frequency"] = "N/A"
+            ext["payment_frequency"] = "N/A"
+            tx.extracted_json = ext
             tx.status = "PENDING_CONFIRM"
             db.commit()
             return await _handle_confirmation(db, user, business, tx, "Initial")
             
     elif button_title in ["Monthly", "Yearly"]:
-        if not tx.extracted_json: tx.extracted_json = {}
-        tx.extracted_json["payment_frequency"] = button_title
+        ext = dict(tx.extracted_json or {})
+        ext["payment_frequency"] = button_title
+        tx.extracted_json = ext
         tx.status = "PENDING_CONFIRM"
         db.commit()
         return await _handle_confirmation(db, user, business, tx, "Initial")
@@ -312,7 +326,11 @@ async def _handle_confirmation(db: Session, user: User, business: Business, tx: 
         return {"status": "awaiting_confirmation"}
 
     if button_title == "Confirm":
-        return await _finalize_transaction(db, user, business, tx, extraction)
+        start_finalize = time.time()
+        res = await _finalize_transaction(db, user, business, tx, extraction)
+        end_finalize = time.time()
+        print(f"  [TIMER] Finalize Transaction Total: {end_finalize - start_finalize:.2f}s")
+        return res
 
     return {"status": "unhandled_confirm"}
 
@@ -333,7 +351,6 @@ async def _finalize_transaction(db: Session, user: User, business: Business, tx:
         if not extracted_date or extracted_date in ["", "null", "N/A"]:
             extracted_date = datetime.now().strftime("%d-%m-%Y")
 
-        last_index = 0
         row = []
 
         if final_type == "Payment":
@@ -356,6 +373,7 @@ async def _finalize_transaction(db: Session, user: User, business: Business, tx:
                 f"Direction: {p_dir} | Recorded via WhatsApp {datetime.now().strftime('%Y-%m-%d')}"
             ]
             gs.append_to_master_ledger(business.master_ledger_sheet_id, row, sheet_name="Payments")
+            last_index = 0 # Payment sheet doesn't need paid/credit toggle for now
         else:
             # Sales/Purchases/Expenses logic
             items = extraction.get("items") or [{
@@ -395,15 +413,22 @@ async def _finalize_transaction(db: Session, user: User, business: Business, tx:
                 ]
                 gs.append_to_master_ledger(business.master_ledger_sheet_id, row, sheet_name=sheet_name)
             
+            t1 = time.time()
             _, last_index = gs.get_last_ledger_row(business.master_ledger_sheet_id, sheet_name=sheet_name)
+            t2 = time.time()
+            print(f"  [TIMER] get_last_ledger_row: {t2-t1:.2f}s")
 
         if tx.media_url and os.path.exists(tx.media_url):
+            t3 = time.time()
             gs.upload_bill_image(tx.media_url, business.drive_folder_id)
             os.remove(tx.media_url)
+            t4 = time.time()
+            print(f"  [TIMER] upload_bill_image: {t4-t3:.2f}s")
         
         # Invoice Generation
         if final_type == "Sale" and business.invoice_template_id:
             try:
+                t5 = time.time()
                 gs.generate_sales_invoice(business.invoice_template_id, {
                     "business_name": business.business_name, "business_gstin": business.business_gstin,
                     "invoice_no": extraction.get("invoice_no", ""), "date": extracted_date,
@@ -412,6 +437,8 @@ async def _finalize_transaction(db: Session, user: User, business: Business, tx:
                     "taxable_value": extraction.get("taxable_value", 0), "cgst": extraction.get("cgst", 0),
                     "sgst": extraction.get("sgst", 0), "igst": extraction.get("igst", 0), "total_amount": extraction.get("total_amount", 0)
                 }, business.drive_folder_id)
+                t6 = time.time()
+                print(f"  [TIMER] generate_sales_invoice: {t6-t5:.2f}s")
             except Exception as inv_err: logger.warning(f"Invoice generation failed: {inv_err}")
 
         tx.status = "COMPLETED"
