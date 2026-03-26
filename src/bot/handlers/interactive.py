@@ -112,7 +112,7 @@ async def _handle_payment_status(db: Session, user: User, business: Business, st
         
         if status == "Paid":
             new_row[20] = "N/A"
-            gs.update_ledger_row(business.master_ledger_sheet_id, row_index, new_row)
+            await gs.update_ledger_row(business.master_ledger_sheet_id, row_index, new_row)
             send_whatsapp_text(user.whatsapp_id, "✅ Marked as Paid!")
         else:
             # For Credit, we need a Due Date
@@ -372,8 +372,13 @@ async def _finalize_transaction(db: Session, user: User, business: Business, tx:
                 extraction.get("total_amount", 0), p_type, p_freq, extracted_date, next_due, "Completed",
                 f"Direction: {p_dir} | Recorded via WhatsApp {datetime.now().strftime('%Y-%m-%d')}"
             ]
-            gs.append_to_master_ledger(business.master_ledger_sheet_id, row, sheet_name="Payments")
-            last_index = 0 # Payment sheet doesn't need paid/credit toggle for now
+            result = await gs.append_to_master_ledger(business.master_ledger_sheet_id, row, sheet_name="Payments")
+            # Extract row index from updatedRange like "Payments!A10:U10"
+            try:
+                updated_range = result.get("updates", {}).get("updatedRange", "")
+                last_index = int(updated_range.split("!")[-1].split(":")[0].replace("A", "").replace("B", "")) # Robust extraction
+            except:
+                last_index = 0
         else:
             # Sales/Purchases/Expenses logic
             items = extraction.get("items") or [{
@@ -389,6 +394,7 @@ async def _finalize_transaction(db: Session, user: User, business: Business, tx:
             pos_state_code = get_state_code(extraction.get("place_of_supply", business_state_code))
             is_intra_state = (business_state_code == pos_state_code)
 
+            last_index = 0
             for item in items:
                 taxable_value = float(item.get("taxable_value", 0))
                 gst_rate = float(item.get("gst_rate", 0))
@@ -411,35 +417,35 @@ async def _finalize_transaction(db: Session, user: User, business: Business, tx:
                     item.get("hsn_description", ""), get_uqc_code(item.get("uqc", "OTH")), item.get("quantity", 1),
                     gst_rate, taxable_value, cgst, sgst, igst, 0, "", ""
                 ]
-                gs.append_to_master_ledger(business.master_ledger_sheet_id, row, sheet_name=sheet_name)
-            
-            t1 = time.time()
-            _, last_index = gs.get_last_ledger_row(business.master_ledger_sheet_id, sheet_name=sheet_name)
-            t2 = time.time()
-            print(f"  [TIMER] get_last_ledger_row: {t2-t1:.2f}s")
+                result = await gs.append_to_master_ledger(business.master_ledger_sheet_id, row, sheet_name=sheet_name)
+                try:
+                    updated_range = result.get("updates", {}).get("updatedRange", "")
+                    last_index = int(''.join(filter(str.isdigit, updated_range.split("!")[-1].split(":")[0])))
+                except:
+                    pass
 
+        # Parallelize Background Tasks (Image Upload & Invoice Generation)
+        tasks = []
         if tx.media_url and os.path.exists(tx.media_url):
-            t3 = time.time()
-            gs.upload_bill_image(tx.media_url, business.drive_folder_id)
-            os.remove(tx.media_url)
-            t4 = time.time()
-            print(f"  [TIMER] upload_bill_image: {t4-t3:.2f}s")
+            tasks.append(gs.upload_bill_image(tx.media_url, business.drive_folder_id))
         
-        # Invoice Generation
         if final_type == "Sale" and business.invoice_template_id:
-            try:
-                t5 = time.time()
-                gs.generate_sales_invoice(business.invoice_template_id, {
-                    "business_name": business.business_name, "business_gstin": business.business_gstin,
-                    "invoice_no": extraction.get("invoice_no", ""), "date": extracted_date,
-                    "customer_name": extraction.get("customer_name", "B2C Customer"), "recipient_gstin": extraction.get("recipient_gstin", ""),
-                    "hsn_code": extraction.get("hsn_code", ""), "gst_rate": extraction.get("gst_rate", 0),
-                    "taxable_value": extraction.get("taxable_value", 0), "cgst": extraction.get("cgst", 0),
-                    "sgst": extraction.get("sgst", 0), "igst": extraction.get("igst", 0), "total_amount": extraction.get("total_amount", 0)
-                }, business.drive_folder_id)
-                t6 = time.time()
-                print(f"  [TIMER] generate_sales_invoice: {t6-t5:.2f}s")
-            except Exception as inv_err: logger.warning(f"Invoice generation failed: {inv_err}")
+            inv_data = {
+                "business_name": business.business_name, "business_gstin": business.business_gstin,
+                "invoice_no": extraction.get("invoice_no", ""), "date": extracted_date,
+                "customer_name": extraction.get("customer_name", "B2C Customer"), "recipient_gstin": extraction.get("recipient_gstin", ""),
+                "hsn_code": extraction.get("hsn_code", ""), "gst_rate": extraction.get("gst_rate", 0),
+                "taxable_value": extraction.get("taxable_value", 0), "cgst": extraction.get("cgst", 0),
+                "sgst": extraction.get("sgst", 0), "igst": extraction.get("igst", 0), "total_amount": extraction.get("total_amount", 0)
+            }
+            tasks.append(gs.generate_sales_invoice(business.invoice_template_id, inv_data, business.drive_folder_id))
+
+        if tasks:
+            import asyncio
+            start_bg = time.time()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            if tx.media_url and os.path.exists(tx.media_url): os.remove(tx.media_url)
+            print(f"  [TIMER] Parallel Background Tasks: {time.time() - start_bg:.2f}s")
 
         tx.status = "COMPLETED"
         user.last_interaction_type = "AWAITING_PAYMENT"
@@ -468,7 +474,7 @@ async def _handle_pdf_conversion(db: Session, user: User, business: Business, tx
                 send_whatsapp_document(user.whatsapp_id, media_id, os.path.basename(pdf_path))
                 send_whatsapp_text(user.whatsapp_id, "✅ Here is your PDF conversion!")
                 gs = GoogleService(user.google_refresh_token)
-                gs.upload_bill_image(pdf_path, business.drive_folder_id)
+                await gs.upload_bill_image(pdf_path, business.drive_folder_id)
                 os.remove(tx.media_url)
                 if os.path.exists(pdf_path): os.remove(pdf_path)
                 tx.status = "COMPLETED"

@@ -103,16 +103,16 @@ class IntegrationBase:
             Transaction.user_whatsapp_id == self.user_id
         ).order_by(Transaction.created_at.desc()).first()
 
-    def check_sheet_for_row(self, sheet_name, amount):
+    async def check_sheet_for_row(self, sheet_name, amount):
         """Verify if a row with the given amount exists in the real Google Sheet"""
         safe_print(f"\n[VERIFYING GOOGLE SHEET] -> Checking {sheet_name} for amount {amount}...")
         gs = GoogleService(self.refresh_token)
         
         # Use the underlying executor for better timeout handling
         url = f"https://sheets.googleapis.com/v4/spreadsheets/{self.sheet_id}/values/{sheet_name}!A:Z"
-        data = gs._execute_with_requests("GET", url)
+        data = await gs._execute_with_requests("GET", url)
         
-        rows = data.get('values', [])
+        rows = data.get('values', []) if data else []
         # Search in the last 10 rows to be efficient
         search_target = str(int(amount)) if float(amount) == int(amount) else str(amount)
         for row in reversed(rows[-10:]):

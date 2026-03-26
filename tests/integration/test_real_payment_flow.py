@@ -29,7 +29,7 @@ async def run_integration():
     await it.click_button("Confirm")
     
     # 7. Verify in Google Sheet
-    it.check_sheet_for_row("Payments", test_amount)
+    await it.check_sheet_for_row("Payments", test_amount)
 
 if __name__ == "__main__":
     asyncio.run(run_integration())

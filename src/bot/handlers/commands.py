@@ -78,7 +78,7 @@ async def handle_command(db: Session, user: User, business: Business, message_da
 
 async def _handle_awaiting_advice(db: Session, user: User, business: Business, text: str):
     gs = GoogleService(user.google_refresh_token)
-    summary = gs.get_business_summary(business.master_ledger_sheet_id)
+    summary = await gs.get_business_summary(business.master_ledger_sheet_id)
     advice_text = consultant_agent.analyze_business(summary, text)
     
     user.last_interaction_type = None
@@ -97,7 +97,7 @@ async def _handle_awaiting_duedate(db: Session, user: User, business: Business, 
     new_row[20] = text # Column U: Due Date
     
     gs = GoogleService(user.google_refresh_token)
-    gs.update_ledger_row(business.master_ledger_sheet_id, row_index, new_row)
+    await gs.update_ledger_row(business.master_ledger_sheet_id, row_index, new_row)
     
     user.last_interaction_type = None
     user.last_interaction_data = None
@@ -157,7 +157,7 @@ async def _handle_awaiting_edit(db: Session, user: User, business: Business, tex
             new_row[3] = corrections.get("date")
         
         gs = GoogleService(user.google_refresh_token)
-        gs.update_ledger_row(business.master_ledger_sheet_id, row_index, new_row)
+        await gs.update_ledger_row(business.master_ledger_sheet_id, row_index, new_row)
         
         user.last_interaction_type = None
         user.last_interaction_data = None
@@ -169,7 +169,7 @@ async def _handle_awaiting_edit(db: Session, user: User, business: Business, tex
 
 async def _handle_stats_command(user: User, business: Business):
     gs = GoogleService(user.google_refresh_token)
-    summary = gs.get_business_summary(business.master_ledger_sheet_id)
+    summary = await gs.get_business_summary(business.master_ledger_sheet_id)
     if not summary:
         send_whatsapp_text(user.whatsapp_id, "I don't have enough data yet to show stats.")
         return {"status": "no_data"}
@@ -187,7 +187,7 @@ async def _handle_stats_command(user: User, business: Business):
 
 async def _handle_analysis_command(user: User, business: Business):
     gs = GoogleService(user.google_refresh_token)
-    summary = gs.get_business_summary(business.master_ledger_sheet_id)
+    summary = await gs.get_business_summary(business.master_ledger_sheet_id)
     if not summary:
         send_whatsapp_text(user.whatsapp_id, "I don't have enough data yet to perform an analysis. Record a few more bills!")
         return {"status": "no_data"}

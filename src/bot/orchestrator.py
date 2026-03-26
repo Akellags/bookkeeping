@@ -90,7 +90,7 @@ class WhatsAppOrchestrator:
                 try:
                     logger.info(f"Lazily initializing Google Drive for user {user_whatsapp_id}")
                     gs = GoogleService(user.google_refresh_token)
-                    folder_id, sheet_id, template_id = gs.initialize_user_drive()
+                    folder_id, sheet_id, template_id = await gs.initialize_user_drive()
                     
                     # Ensure business has correct IDs
                     business.drive_folder_id = folder_id
