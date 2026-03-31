@@ -36,9 +36,12 @@ def verify_state(token: str) -> str:
 def get_whatsapp_media_url(media_id: str):
     """Retrieves the direct download URL for a media ID from Meta's servers"""
     try:
-        url = f"https://graph.facebook.com/v17.0/{media_id}"
-        headers = {"Authorization": f"Bearer {META_ACCESS_TOKEN}"}
+        token = os.getenv("META_ACCESS_TOKEN")
+        url = f"https://graph.facebook.com/v18.0/{media_id}"
+        headers = {"Authorization": f"Bearer {token}"}
         response = requests.get(url, headers=headers)
+        if response.status_code != 200:
+            logger.error(f"Meta Graph API Error (Media URL): {response.status_code} - {response.text}")
         response.raise_for_status()
         return response.json().get("url")
     except Exception as e:
@@ -48,8 +51,11 @@ def get_whatsapp_media_url(media_id: str):
 def download_whatsapp_media(media_url: str, save_path: str):
     """Downloads media from the retrieved URL and saves it locally"""
     try:
-        headers = {"Authorization": f"Bearer {META_ACCESS_TOKEN}"}
+        token = os.getenv("META_ACCESS_TOKEN")
+        headers = {"Authorization": f"Bearer {token}"}
         response = requests.get(media_url, headers=headers)
+        if response.status_code != 200:
+            logger.error(f"Meta Download Error: {response.status_code}")
         response.raise_for_status()
         with open(save_path, "wb") as f:
             f.write(response.content)
@@ -157,9 +163,10 @@ def send_whatsapp_interactive(recipient_id: str, body: str, buttons: list, phone
     """Sends an interactive message with buttons (max 3) or a list (up to 10) to the user"""
     try:
         phone_id = phone_number_id or os.getenv("META_PHONE_NUMBER_ID")
+        token = os.getenv("META_ACCESS_TOKEN")
         url = f"https://graph.facebook.com/v17.0/{phone_id}/messages"
         headers = {
-            "Authorization": f"Bearer {META_ACCESS_TOKEN}",
+            "Authorization": f"Bearer {token}",
             "Content-Type": "application/json"
         }
         
@@ -226,9 +233,10 @@ def send_whatsapp_text(recipient_id: str, text: str, phone_number_id: str = None
     """Sends a text message back to the user via WhatsApp Cloud API"""
     try:
         phone_id = phone_number_id or os.getenv("META_PHONE_NUMBER_ID")
+        token = os.getenv("META_ACCESS_TOKEN")
         url = f"https://graph.facebook.com/v17.0/{phone_id}/messages"
         headers = {
-            "Authorization": f"Bearer {META_ACCESS_TOKEN}",
+            "Authorization": f"Bearer {token}",
             "Content-Type": "application/json"
         }
         payload = {
@@ -248,8 +256,9 @@ def upload_whatsapp_media(file_path: str, phone_number_id: str = None):
     """Uploads a file to WhatsApp's media servers and returns the media ID"""
     try:
         phone_id = phone_number_id or os.getenv("META_PHONE_NUMBER_ID")
+        token = os.getenv("META_ACCESS_TOKEN")
         url = f"https://graph.facebook.com/v17.0/{phone_id}/media"
-        headers = {"Authorization": f"Bearer {META_ACCESS_TOKEN}"}
+        headers = {"Authorization": f"Bearer {token}"}
         
         # Determine mime type (basic)
         # Note: Meta API does not support application/json for document uploads.
@@ -278,9 +287,10 @@ def send_whatsapp_document(recipient_id: str, media_id: str, filename: str, phon
     """Sends a document (PDF, JSON, etc.) to a user via media ID"""
     try:
         phone_id = phone_number_id or os.getenv("META_PHONE_NUMBER_ID")
+        token = os.getenv("META_ACCESS_TOKEN")
         url = f"https://graph.facebook.com/v17.0/{phone_id}/messages"
         headers = {
-            "Authorization": f"Bearer {META_ACCESS_TOKEN}",
+            "Authorization": f"Bearer {token}",
             "Content-Type": "application/json"
         }
         payload = {

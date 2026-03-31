@@ -24,7 +24,7 @@ This document provides a deep understanding of each WhatsApp command/option prov
     *   The pending transaction is fetched from the database based on the `user_whatsapp_id`.
     *   If **"Purchase Invoice"** or **"Sale Receipt"** is chosen, `AIProcessor.process_purchase_image` in [./src/ai_processor.py](./src/ai_processor.py) is called with the base64-encoded image.
 5.  **AI Extraction**:
-    *   The `gpt-4o-mini` model with vision capabilities parses the bill for GSTINs, HSN codes, dates, amounts, and tax splits based on the `system_prompt`.
+    *   The `gpt-5.4-mini` model with vision capabilities parses the bill for GSTINs, HSN codes, dates, amounts, and tax splits based on the `system_prompt`.
 6.  **Ledger Update**:
     *   `GoogleService.append_to_master_ledger` in [./src/google_service.py](./src/google_service.py) appends the extracted JSON data to the user's "Master_Ledger" Google Sheet.
     *   The image is uploaded to the "Help U" folder on the user's Google Drive via `GoogleService.upload_bill_image`.
@@ -107,7 +107,7 @@ This document provides a deep understanding of each WhatsApp command/option prov
     *   `GoogleService.get_business_summary` in [./src/google_service.py](./src/google_service.py) aggregates the entire ledger into a structured summary (Monthly totals, Top Customers, Overdue payments, GST collections).
 2.  **Expert Analysis**:
     *   The summary is passed to `ConsultantAgent.analyze_business` in [./src/consultant_agent.py](./src/consultant_agent.py).
-    *   The `gpt-4o-mini` model (Help U Expert role) analyzes the growth, risks, and GST compliance.
+    *   The `gpt-5.4-mini` model (Help U Expert role) analyzes the growth, risks, and GST compliance.
 3.  **Response**: A conversational report is sent with emojis and professional advice (max 3-4 paragraphs).
 
 ---

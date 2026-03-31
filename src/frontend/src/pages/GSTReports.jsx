@@ -6,11 +6,11 @@ import {
   Loader2,
   AlertCircle
 } from 'lucide-react';
-import Layout from '../components/Layout';
+import { useUser } from '../context/UserContext';
 
 const GSTReports = () => {
+  const { userStats: globalUserStats, whatsappId } = useUser();
   const [reportData, setReportData] = useState([]);
-  const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState(null);
@@ -25,9 +25,7 @@ const GSTReports = () => {
   const handleDownload = async () => {
     try {
       setDownloading(true);
-      const whatsappId = localStorage.getItem('whatsapp_id');
-      const isValidId = whatsappId && whatsappId !== 'null' && whatsappId !== 'undefined';
-      if (!isValidId) return;
+      if (!whatsappId) return;
       let url = `/api/user/reports/download?whatsapp_id=${whatsappId}`;
       if (dateRange.start) url += `&start_date=${formatDate(dateRange.start)}`;
       if (dateRange.end) url += `&end_date=${formatDate(dateRange.end)}`;
@@ -50,18 +48,14 @@ const GSTReports = () => {
   };
 
   const downloadInvoice = (invoiceNo) => {
-    const whatsappId = localStorage.getItem('whatsapp_id');
-    const isValidId = whatsappId && whatsappId !== 'null' && whatsappId !== 'undefined';
-    if (!isValidId) return;
+    if (!whatsappId) return;
     window.open(`/api/user/invoice/pdf?whatsapp_id=${whatsappId}&invoice_no=${invoiceNo}`, '_blank');
   };
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const whatsappId = localStorage.getItem('whatsapp_id');
-        const isValidId = whatsappId && whatsappId !== 'null' && whatsappId !== 'undefined';
-        if (!isValidId) {
+        if (!whatsappId) {
            setLoading(false);
            return;
         }
@@ -78,11 +72,9 @@ const GSTReports = () => {
           reportsUrl += `&${params.join('&')}`;
         }
 
-        const [statsRes, reportRes] = await Promise.all([
-          axios.get(statsUrl),
+        const [reportRes] = await Promise.all([
           axios.get(reportsUrl)
         ]);
-        setStats(statsRes.data);
         setReportData(reportRes.data.rows || []);
       } catch (err) {
         console.error('Error fetching report data:', err);
@@ -92,11 +84,11 @@ const GSTReports = () => {
       }
     };
     fetchData();
-  }, [dateRange]);
+  }, [dateRange, whatsappId, globalUserStats?.business_id]);
 
-  if (loading) {
+  if (loading && reportData.length === 0) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-50">
+      <div className="flex items-center justify-center min-h-[60vh]">
         <Loader2 className="w-10 h-10 text-blue-600 animate-spin" />
       </div>
     );
@@ -107,98 +99,96 @@ const GSTReports = () => {
   const rows = reportData.slice(1);
 
   return (
-    <Layout userStats={stats}>
-      <div className="space-y-6">
-        {/* Filters & Actions */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
-          <div className="flex flex-col sm:flex-row items-center gap-4">
-            <div className="flex items-center gap-2 bg-gray-50 px-3 py-2 rounded-lg border border-gray-200">
-              <span className="text-xs font-bold text-gray-400 uppercase">From</span>
-              <input 
-                type="date" 
-                value={dateRange.start}
-                onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
-                className="text-sm font-semibold text-gray-700 bg-transparent border-none focus:ring-0 cursor-pointer" 
-              />
-            </div>
-            <div className="flex items-center gap-2 bg-gray-50 px-3 py-2 rounded-lg border border-gray-200">
-              <span className="text-xs font-bold text-gray-400 uppercase">To</span>
-              <input 
-                type="date" 
-                value={dateRange.end}
-                onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
-                className="text-sm font-semibold text-gray-700 bg-transparent border-none focus:ring-0 cursor-pointer" 
-              />
-            </div>
-            <p className="text-sm text-gray-500">{rows.length} transactions found</p>
+    <div className="space-y-6">
+      {/* Filters & Actions */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
+        <div className="flex flex-col sm:flex-row items-center gap-4">
+          <div className="flex items-center gap-2 bg-gray-50 px-3 py-2 rounded-lg border border-gray-200">
+            <span className="text-xs font-bold text-gray-400 uppercase">From</span>
+            <input 
+              type="date" 
+              value={dateRange.start}
+              onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
+              className="text-sm font-semibold text-gray-700 bg-transparent border-none focus:ring-0 cursor-pointer" 
+            />
           </div>
-          <button 
-            onClick={handleDownload}
-            disabled={downloading}
-            className="flex items-center space-x-2 bg-blue-600 text-white font-bold py-2.5 px-5 rounded-xl hover:bg-blue-700 transition shadow-sm disabled:opacity-50"
-          >
-            {downloading ? <Loader2 className="animate-spin" size={18} /> : <Download size={18} />}
-            <span>{downloading ? 'Generating...' : 'Download GSTR-1 (JSON)'}</span>
-          </button>
+          <div className="flex items-center gap-2 bg-gray-50 px-3 py-2 rounded-lg border border-gray-200">
+            <span className="text-xs font-bold text-gray-400 uppercase">To</span>
+            <input 
+              type="date" 
+              value={dateRange.end}
+              onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
+              className="text-sm font-semibold text-gray-700 bg-transparent border-none focus:ring-0 cursor-pointer" 
+            />
+          </div>
+          <p className="text-sm text-gray-500">{rows.length} transactions found</p>
         </div>
+        <button 
+          onClick={handleDownload}
+          disabled={downloading}
+          className="flex items-center space-x-2 bg-blue-600 text-white font-bold py-2.5 px-5 rounded-xl hover:bg-blue-700 transition shadow-sm disabled:opacity-50"
+        >
+          {downloading ? <Loader2 className="animate-spin" size={18} /> : <Download size={18} />}
+          <span>{downloading ? 'Generating...' : 'Download GSTR-1 (JSON)'}</span>
+        </button>
+      </div>
 
-        {error && (
-          <div className="bg-red-50 border border-red-100 text-red-600 p-4 rounded-xl flex items-center space-x-3">
-            <AlertCircle size={20} />
-            <span>{error}</span>
-          </div>
-        )}
+      {error && (
+        <div className="bg-red-50 border border-red-100 text-red-600 p-4 rounded-xl flex items-center space-x-3">
+          <AlertCircle size={20} />
+          <span>{error}</span>
+        </div>
+      )}
 
-        {/* Table */}
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-gray-50 border-b border-gray-100">
-                  <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider whitespace-nowrap">
-                    Action
+      {/* Table */}
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-100">
+                <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider whitespace-nowrap">
+                  Action
+                </th>
+                {headers.map((header, i) => (
+                  <th key={i} className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider whitespace-nowrap">
+                    {header}
                   </th>
-                  {headers.map((header, i) => (
-                    <th key={i} className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider whitespace-nowrap">
-                      {header}
-                    </th>
-                  ))}
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {rows.length === 0 ? (
+                <tr>
+                  <td colSpan={headers.length + 1} className="px-6 py-10 text-center text-gray-500">
+                    No transactions recorded yet. Start by sending a bill photo to WhatsApp!
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {rows.length === 0 ? (
-                  <tr>
-                    <td colSpan={headers.length + 1} className="px-6 py-10 text-center text-gray-500">
-                      No transactions recorded yet. Start by sending a bill photo to WhatsApp!
+              ) : (
+                rows.map((row, i) => (
+                  <tr key={i} className="hover:bg-gray-50 transition">
+                    <td className="px-6 py-4 text-sm">
+                      {row[8] === 'Sale' && (
+                        <button 
+                          onClick={() => downloadInvoice(row[2])}
+                          className="text-blue-600 hover:text-blue-800 font-bold"
+                        >
+                          PDF
+                        </button>
+                      )}
                     </td>
-                  </tr>
-                ) : (
-                  rows.map((row, i) => (
-                    <tr key={i} className="hover:bg-gray-50 transition">
-                      <td className="px-6 py-4 text-sm">
-                        {row[8] === 'Sale' && (
-                          <button 
-                            onClick={() => downloadInvoice(row[2])}
-                            className="text-blue-600 hover:text-blue-800 font-bold"
-                          >
-                            PDF
-                          </button>
-                        )}
+                    {row.map((cell, j) => (
+                      <td key={j} className="px-6 py-4 text-sm text-gray-700 whitespace-nowrap">
+                        {j === 4 ? `₹${Number(cell).toLocaleString()}` : cell}
                       </td>
-                      {row.map((cell, j) => (
-                        <td key={j} className="px-6 py-4 text-sm text-gray-700 whitespace-nowrap">
-                          {j === 4 ? `₹${Number(cell).toLocaleString()}` : cell}
-                        </td>
-                      ))}
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                    ))}
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
-    </Layout>
+    </div>
   );
 };
 

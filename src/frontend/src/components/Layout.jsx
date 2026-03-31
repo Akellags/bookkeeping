@@ -6,44 +6,26 @@ import {
   LogOut,
   Building,
   ChevronDown,
-  Plus
+  Plus,
+  ArrowLeft
 } from 'lucide-react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import axios from 'axios';
+import { useUser } from '../context/UserContext';
 
-const isValidId = (id) => id && id !== 'null' && id !== 'undefined' && id.trim() !== '';
-
-const Layout = ({ children, userStats }) => {
+const Layout = ({ children }) => {
+  const { userStats, businesses, whatsappId, fetchUserStats, fetchBusinesses, logout } = useUser();
   const navigate = useNavigate();
   const location = useLocation();
-  const [businesses, setBusinesses] = useState([]);
   const [showSwitch, setShowSwitch] = useState(false);
 
-  useEffect(() => {
-    const whatsappId = localStorage.getItem('whatsapp_id');
-
-    if (!isValidId(whatsappId) && location.pathname !== '/') {
-      navigate('/');
-      return;
-    }
-
-    const fetchBusinesses = async () => {
-      try {
-        if (!isValidId(whatsappId)) return;
-        const response = await axios.get(`/api/user/businesses?whatsapp_id=${whatsappId}`);
-        setBusinesses(response.data.businesses || []);
-      } catch (error) {
-        console.error('Error fetching businesses:', error);
-      }
-    };
-    if (isValidId(whatsappId)) fetchBusinesses();
-  }, [navigate, location.pathname]);
+  const isRecordPage = location.pathname === '/transactions/new';
 
   const handleSwitch = async (businessId) => {
     try {
-      const whatsappId = localStorage.getItem('whatsapp_id');
       await axios.post(`/api/user/businesses/switch?whatsapp_id=${whatsappId}&business_id=${businessId}`);
-      window.location.reload(); 
+      await fetchUserStats();
+      setShowSwitch(false);
     } catch (error) {
       console.error('Switch failed:', error);
     }
@@ -54,9 +36,9 @@ const Layout = ({ children, userStats }) => {
     const gstin = prompt("Enter Business GSTIN:");
     if (name && gstin) {
       try {
-        const whatsappId = localStorage.getItem('whatsapp_id');
         await axios.post(`/api/user/businesses/add?whatsapp_id=${whatsappId}&business_name=${name}&business_gstin=${gstin}`);
-        window.location.reload();
+        await Promise.all([fetchUserStats(), fetchBusinesses()]);
+        setShowSwitch(false);
       } catch (error) {
         console.error('Add business failed:', error);
       }
@@ -66,12 +48,12 @@ const Layout = ({ children, userStats }) => {
   const handleLogout = async () => {
     try {
       await axios.post('/api/auth/logout');
-      localStorage.removeItem('whatsapp_id');
-      window.location.href = '/'; // Force a full reload to clear all states
+      logout();
+      navigate('/');
     } catch (error) {
       console.error('Logout failed:', error);
-      localStorage.removeItem('whatsapp_id');
-      window.location.href = '/';
+      logout();
+      navigate('/');
     }
   };
 
@@ -86,7 +68,7 @@ const Layout = ({ children, userStats }) => {
       {/* Sidebar */}
       <aside className="w-full md:w-64 bg-white border-r border-gray-200 p-6 flex flex-col space-y-8">
         <div className="flex items-center space-x-3">
-          <div className="bg-blue-600 text-white p-2 rounded-lg font-bold">HU</div>
+          <div className="bg-blue-600 text-white p-2 rounded-md font-bold">HU</div>
           <h1 className="text-xl font-bold text-gray-900 tracking-tight">Help U</h1>
         </div>
         
@@ -94,7 +76,7 @@ const Layout = ({ children, userStats }) => {
         <div className="relative">
           <button 
             onClick={() => setShowSwitch(!showSwitch)}
-            className="w-full flex items-center justify-between p-3 bg-gray-50 rounded-xl border border-gray-100 hover:border-blue-200 transition"
+            className="w-full flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-100 hover:border-blue-200 transition"
           >
             <div className="flex items-center space-x-2 overflow-hidden text-left">
               <Building size={16} className="text-blue-600 flex-shrink-0" />
@@ -106,7 +88,7 @@ const Layout = ({ children, userStats }) => {
           </button>
           
           {showSwitch && (
-            <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-100 shadow-xl rounded-xl z-50 overflow-hidden py-1">
+            <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-100 shadow-xl rounded-lg z-50 overflow-hidden py-1">
               {businesses.map(b => (
                 <button
                   key={b.id}
@@ -133,7 +115,7 @@ const Layout = ({ children, userStats }) => {
             <Link
               key={item.name}
               to={item.path}
-              className={`flex items-center space-x-3 p-3 rounded-xl transition font-semibold ${
+              className={`flex items-center space-x-3 p-3 rounded-lg transition font-semibold ${
                 location.pathname === item.path 
                 ? 'bg-blue-50 text-blue-700' 
                 : 'text-gray-500 hover:bg-gray-50'
@@ -145,28 +127,40 @@ const Layout = ({ children, userStats }) => {
           ))}
           <button 
             onClick={handleLogout}
-            className="flex items-center space-x-3 text-red-500 hover:bg-red-50 p-3 rounded-xl transition w-full text-left font-semibold"
+            className="flex items-center space-x-3 text-red-500 hover:bg-red-50 p-3 rounded-lg transition w-full text-left font-semibold"
           >
             <LogOut size={20} />
             <span>Logout</span>
           </button>
         </nav>
 
-        <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-2xl p-4 text-white">
+        <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-xl p-4 text-white">
           <p className="text-xs opacity-75 mb-1">Current Plan</p>
           <p className="font-bold mb-3">Free Trial (7 Days)</p>
-          <button className="bg-white text-blue-600 text-xs font-bold py-2 px-4 rounded-lg w-full">Upgrade Now</button>
+          <button className="bg-white text-blue-600 text-xs font-bold py-2 px-4 rounded-md w-full">Upgrade Now</button>
         </div>
       </aside>
 
       {/* Main Content */}
       <main className="flex-1 p-8">
         <header className="flex justify-between items-center mb-10">
-          <div>
-            <h2 className="text-2xl font-bold text-gray-900">
-              {navItems.find(i => i.path === location.pathname)?.name || 'Dashboard'}
-            </h2>
-            <p className="text-gray-500">Welcome back, {userStats?.google_email || 'User'}</p>
+          <div className="flex items-center space-x-4">
+            {isRecordPage && (
+              <button 
+                onClick={() => navigate('/dashboard')}
+                className="p-2.5 hover:bg-gray-100 rounded-full transition text-gray-500 border border-gray-100 shadow-sm"
+              >
+                <ArrowLeft size={22} />
+              </button>
+            )}
+            <div>
+              <h2 className="text-2xl font-black text-gray-900 tracking-tight">
+                {isRecordPage ? 'Record Transaction' : (navItems.find(i => i.path === location.pathname)?.name || 'Dashboard')}
+              </h2>
+              <p className="text-sm font-bold text-gray-400 uppercase tracking-widest mt-0.5">
+                {isRecordPage ? 'Add new data to your ledger' : `Welcome back, ${userStats?.google_email || 'User'}`}
+              </p>
+            </div>
           </div>
           <div className="flex items-center space-x-4 text-right">
             <div>

@@ -1,13 +1,13 @@
 import os
 import logging
-from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from src.db_service import SessionLocal, User, Business
 from src.utils import send_whatsapp_text
 from src.google_service import GoogleService
 
 logger = logging.getLogger(__name__)
 
-def send_overdue_reminders():
+async def send_overdue_reminders():
     """Daily task to check for overdue payments and notify users"""
     db = SessionLocal()
     try:
@@ -24,7 +24,7 @@ def send_overdue_reminders():
 
             try:
                 gs = GoogleService(user.google_refresh_token)
-                summary = gs.get_business_summary(business.master_ledger_sheet_id)
+                summary = await gs.get_business_summary(business.master_ledger_sheet_id)
                 
                 if summary and summary.get("overdue_payments"):
                     overdue_list = summary["overdue_payments"]
@@ -72,7 +72,7 @@ def send_monthly_gst_reminder():
 
 def init_scheduler():
     """Starts the background scheduler for monthly tasks"""
-    scheduler = BackgroundScheduler()
+    scheduler = AsyncIOScheduler()
     
     # Run on the 5th of every month at 10:00 AM
     scheduler.add_job(

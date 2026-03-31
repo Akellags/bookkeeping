@@ -51,7 +51,7 @@ async def get_user_stats(whatsapp_id: str, start_date: str = None, end_date: str
 
     # 1. Fetch Google Sheets totals
     gs = GoogleService(user.google_refresh_token)
-    ledger_stats = gs.get_ledger_stats(business.master_ledger_sheet_id, start_date, end_date)
+    ledger_stats = await gs.get_ledger_stats(business.master_ledger_sheet_id, start_date, end_date)
     
     # 2. Return aggregated stats
     return {
@@ -184,7 +184,7 @@ async def add_business(whatsapp_id: str, business_name: str, business_gstin: str
     
     # Initialize Google Drive for new business
     gs = GoogleService(user.google_refresh_token)
-    folder_id, sheet_id, template_id = gs.initialize_user_drive()
+    folder_id, sheet_id, template_id = await gs.initialize_user_drive()
     
     business_id = str(uuid.uuid4())
     new_business = Business(
@@ -267,6 +267,45 @@ async def process_text_fe(
     
     return {"extraction": extraction}
 
+@router.post("/transactions/process-voice")
+async def process_voice_fe(
+    whatsapp_id: str = Query(...), 
+    file: UploadFile = File(...), 
+    db: Session = Depends(get_db)
+):
+    """Transcribes audio and processes it for the frontend"""
+    user = db.query(User).filter(User.whatsapp_id == whatsapp_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    
+    # Save temporary audio file
+    temp_id = str(uuid.uuid4())
+    # Try to keep extension from file, or default to .webm (common from browsers)
+    ext = os.path.splitext(file.filename)[1] or ".webm"
+    temp_path = f"temp_voice_{temp_id}{ext}"
+    
+    with open(temp_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    
+    try:
+        # 1. Transcribe with Whisper
+        transcript = ai_processor.transcribe_audio(temp_path)
+        if not transcript:
+            raise HTTPException(status_code=500, detail="Transcription failed")
+            
+        # 2. Process transcript text
+        extraction = ai_processor.process_sales_text(transcript)
+        if not extraction:
+            raise HTTPException(status_code=500, detail="AI extraction failed")
+            
+        return {"transcript": transcript, "extraction": extraction}
+    except Exception as e:
+        logger.error(f"Error processing voice: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
 @router.post("/transactions/save")
 async def save_transaction_fe(
     whatsapp_id: str = Query(...), 
@@ -287,34 +326,104 @@ async def save_transaction_fe(
         extraction = data.extraction
         logger.info(f"Extraction to save: {extraction}")
         final_type = extraction.get("transaction_type", "Sale")
-    
-        row = [
-            extraction.get("recipient_gstin", ""), 
-            extraction.get("vendor_name" if final_type == "Purchase" else "customer_name", "B2C Customer"),
-            extraction.get("invoice_no", ""),
-            extraction.get("date", ""),
-            extraction.get("total_amount", 0),
-            get_state_code(extraction.get("place_of_supply", "37")),
-            extraction.get("reverse_charge", "N"),
-            "B2B" if extraction.get("recipient_gstin") else "B2CS",
-            final_type,
-            extraction.get("hsn_code", ""),
-            extraction.get("hsn_description", ""),
-            get_uqc_code(extraction.get("uqc", "OTH")),
-            extraction.get("quantity", 1),
-            extraction.get("gst_rate", 0),
-            extraction.get("taxable_value", 0),
-            extraction.get("cgst", 0),
-            extraction.get("sgst", 0),
-            extraction.get("igst", 0),
-            0 # Cess
-        ]
         
-        gs = GoogleService(user.google_refresh_token)
-        gs.append_to_master_ledger(business.master_ledger_sheet_id, row)
+        # Robust data parsing from both AI and Manual frontend inputs
+        # 1. Basic Fields Mapping
+        party_name = extraction.get("party_name") or extraction.get("vendor_name") or extraction.get("customer_name") or "B2C Customer"
+        party_gstin = (extraction.get("party_gstin") or extraction.get("recipient_gstin") or "").strip().upper()
+        invoice_no = extraction.get("invoice_no") or extraction.get("reference_id") or ""
+        date = extraction.get("date", datetime.now().strftime("%Y-%m-%d"))
+        
+        # 2. Amount and GST Rates Parsing
+        try:
+            total_amount = float(str(extraction.get("total_amount", 0)).replace(",", ""))
+        except:
+            total_amount = 0.0
+            
+        try:
+            gst_rate = float(str(extraction.get("gst_rate", 0)).replace("%", ""))
+        except:
+            gst_rate = 0.0
+            
+        # 3. Tax Calculation (if not provided by extraction)
+        taxable_value = extraction.get("taxable_value")
+        cgst = extraction.get("cgst")
+        sgst = extraction.get("sgst")
+        igst = extraction.get("igst")
+        
+        place_of_supply = extraction.get("place_of_supply", business.business_gstin[:2] if business.business_gstin else "37")
+        is_inter_state = False
+        if business.business_gstin and len(business.business_gstin) >= 2 and party_gstin and len(party_gstin) >= 2:
+            is_inter_state = business.business_gstin[:2] != party_gstin[:2]
+
+        if taxable_value is None or taxable_value == 0:
+            if gst_rate > 0:
+                taxable_value = total_amount / (1 + (gst_rate / 100))
+                total_tax = total_amount - taxable_value
+                if is_inter_state:
+                    igst = total_tax
+                    cgst = 0
+                    sgst = 0
+                else:
+                    cgst = total_tax / 2
+                    sgst = total_tax / 2
+                    igst = 0
+            else:
+                taxable_value = total_amount
+                cgst = sgst = igst = 0
+
+        # Round values for display
+        taxable_value = round(float(taxable_value or 0), 2)
+        cgst = round(float(cgst or 0), 2)
+        sgst = round(float(sgst or 0), 2)
+        igst = round(float(igst or 0), 2)
+        
+        # 4. Handle "Payment" type separately (Different Google Sheet Schema)
+        if final_type == "Payment":
+            payment_row = [
+                party_name,
+                total_amount,
+                "One-time", # Default
+                "-",
+                date,
+                "-",
+                extraction.get("payment_mode", "Online"),
+                extraction.get("notes", "")
+            ]
+            gs = GoogleService(user.google_refresh_token)
+            await gs.append_to_master_ledger(business.master_ledger_sheet_id, payment_row, sheet_name="Payments")
+        else:
+            # 5. Ledger Row Preparation (Sale, Purchase, Expense)
+            # Schema from GoogleService._get_ledger_headers (21 columns)
+            row = [
+                party_gstin,             # 0: Recipient GSTIN
+                party_name,              # 1: Receiver Name
+                invoice_no,              # 2: Invoice Number
+                date,                    # 3: Invoice date
+                total_amount,            # 4: Invoice Value
+                get_state_code(place_of_supply), # 5: Place Of Supply
+                extraction.get("reverse_charge", "N"), # 6: Reverse Charge
+                "B2B" if party_gstin else "B2CS", # 7: Invoice Type
+                final_type,              # 8: Transaction Type
+                extraction.get("hsn_code", ""), # 9: HSN Code
+                extraction.get("hsn_description", ""), # 10: HSN Description
+                get_uqc_code(extraction.get("uqc", "OTH")), # 11: UQC
+                extraction.get("quantity", 1), # 12: Quantity
+                gst_rate,                # 13: Rate
+                taxable_value,           # 14: Taxable Value
+                cgst,                    # 15: CGST
+                sgst,                    # 16: SGST
+                igst,                    # 17: IGST
+                0,                       # 18: Cess Amount
+                extraction.get("payment_mode", "Paid"), # 19: Payment Status
+                extraction.get("due_date", "") # 20: Due Date
+            ]
+            
+            gs = GoogleService(user.google_refresh_token)
+            await gs.append_to_master_ledger(business.master_ledger_sheet_id, row, sheet_name=final_type)
         
         if data.media_url and os.path.exists(data.media_url):
-            gs.upload_bill_image(data.media_url, business.drive_folder_id)
+            await gs.upload_bill_image(data.media_url, business.drive_folder_id)
             os.remove(data.media_url)
             
         return {"status": "success"}
@@ -338,7 +447,7 @@ async def get_user_reports(whatsapp_id: str, start_date: str = None, end_date: s
             raise HTTPException(status_code=401, detail="Business not found")
 
         gs = GoogleService(user.google_refresh_token)
-        rows = gs.get_ledger_rows(business.master_ledger_sheet_id, start_date, end_date)
+        rows = await gs.get_ledger_rows(business.master_ledger_sheet_id, start_date, end_date)
         return {"rows": rows}
 
 @router.get("/user/reports/download")
@@ -364,7 +473,7 @@ async def download_gstr1(whatsapp_id: str, start_date: str = None, end_date: str
             if len(parts) == 3:
                 fp = f"{parts[1]}{parts[2]}"
 
-        gstr1_data = gs.generate_gstr1_json(business.master_ledger_sheet_id, user_gstin, fp)
+        gstr1_data = await gs.generate_gstr1_json(business.master_ledger_sheet_id, user_gstin, fp)
         if not gstr1_data:
             raise HTTPException(status_code=404, detail="No data found for the selected period")
 
@@ -390,7 +499,7 @@ async def get_invoice_pdf(whatsapp_id: str, invoice_no: str, db: Session = Depen
         "business_gstin": business.business_gstin or "37ABCDE1234F1Z5"
     }
     
-    pdf_buffer = gs.generate_invoice_pdf_buffer(business.master_ledger_sheet_id, invoice_no, user_profile)
+    pdf_buffer = await gs.generate_invoice_pdf_buffer(business.master_ledger_sheet_id, invoice_no, user_profile)
     if not pdf_buffer:
         raise HTTPException(status_code=404, detail="Invoice not found")
         

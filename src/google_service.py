@@ -646,50 +646,58 @@ class GoogleService:
             if os.path.exists(temp_path): os.remove(temp_path)
 
     async def get_business_summary(self, sheet_id: str):
-        """Aggregates ledger data into a summary for AI Consultant Agent"""
+        """Aggregates ledger data from all sheets into a summary for AI Consultant Agent"""
         from datetime import datetime, timedelta
         from collections import Counter
         
-        rows = await self.get_ledger_rows(sheet_id)
-        if not rows or len(rows) <= 1: return None
-            
-        data_rows = rows[1:]
         today = datetime.now()
         this_month, last_month = today.strftime("%m-%Y"), (today.replace(day=1) - timedelta(days=1)).strftime("%m-%Y")
         
         summary = {
-            "this_month": {"sales": 0, "purchases": 0, "gst_collected": 0, "gst_paid": 0},
-            "last_month": {"sales": 0, "purchases": 0},
+            "this_month": {"sales": 0, "purchases": 0, "expenses": 0, "gst_collected": 0, "gst_paid": 0},
+            "last_month": {"sales": 0, "purchases": 0, "expenses": 0},
             "top_customers": Counter(), "top_vendors": Counter(), "overdue_payments": [], "total_unpaid": 0
         }
         
-        for row in data_rows:
-            if len(row) < 9: continue
-            try:
-                val, tx_type, dt_str = float(row[4] or 0), row[8], row[3]
-                row_month = datetime.strptime(dt_str, "%d-%m-%Y").strftime("%m-%Y")
-                gst_total = float(row[15] or 0) + float(row[16] or 0) + float(row[17] or 0)
-                
-                if row_month == this_month:
-                    if tx_type == "Sale":
-                        summary["this_month"]["sales"] += val
-                        summary["this_month"]["gst_collected"] += gst_total
-                    else:
-                        summary["this_month"]["purchases"] += val
-                        summary["this_month"]["gst_paid"] += gst_total
-                elif row_month == last_month:
-                    if tx_type == "Sale": summary["last_month"]["sales"] += val
-                    else: summary["last_month"]["purchases"] += val
-                
-                entity_name = row[1]
-                if tx_type == "Sale": summary["top_customers"][entity_name] += val
-                else: summary["top_vendors"][entity_name] += val
+        # Scan Sales, Purchases, and Expenses
+        for sheet_name in ["Sales", "Purchases", "Expenses"]:
+            rows = await self.get_ledger_rows(sheet_id, sheet_name=sheet_name)
+            if not rows or len(rows) <= 1: continue
+            
+            data_rows = rows[1:]
+            for row in data_rows:
+                if len(row) < 9: continue
+                try:
+                    val = float(row[4] or 0)
+                    tx_type = row[8]
+                    dt_str = row[3]
+                    row_month = datetime.strptime(dt_str, "%d-%m-%Y").strftime("%m-%Y")
+                    gst_total = float(row[15] or 0) + float(row[16] or 0) + float(row[17] or 0)
                     
-                if len(row) > 19 and row[19] == "Unpaid":
-                    summary["total_unpaid"] += val
-                    if row[20] and row[20] != "N/A":
-                        summary["overdue_payments"].append({"entity": entity_name, "amount": val, "due": row[20], "inv": row[2]})
-            except: continue
+                    if row_month == this_month:
+                        if tx_type == "Sale":
+                            summary["this_month"]["sales"] += val
+                            summary["this_month"]["gst_collected"] += gst_total
+                        elif tx_type == "Purchase":
+                            summary["this_month"]["purchases"] += val
+                            summary["this_month"]["gst_paid"] += gst_total
+                        elif tx_type == "Expense":
+                            summary["this_month"]["expenses"] += val
+                    
+                    elif row_month == last_month:
+                        if tx_type == "Sale": summary["last_month"]["sales"] += val
+                        elif tx_type == "Purchase": summary["last_month"]["purchases"] += val
+                        elif tx_type == "Expense": summary["last_month"]["expenses"] += val
+                    
+                    entity_name = row[1]
+                    if tx_type == "Sale": summary["top_customers"][entity_name] += val
+                    else: summary["top_vendors"][entity_name] += val
+                        
+                    if len(row) > 19 and row[19] == "Unpaid":
+                        summary["total_unpaid"] += val
+                        if row[20] and row[20] != "N/A":
+                            summary["overdue_payments"].append({"entity": entity_name, "amount": val, "due": row[20], "inv": row[2], "type": tx_type})
+                except: continue
                 
         summary["top_customers"] = dict(summary["top_customers"].most_common(3))
         summary["top_vendors"] = dict(summary["top_vendors"].most_common(3))

@@ -96,7 +96,7 @@ async def google_callback(code: str, state: str = None):
             if not existing_business:
                 # Initialize Google Drive Folder/Sheet/Template
                 gs = GoogleService(credentials.refresh_token)
-                folder_id, sheet_id, template_id = gs.initialize_user_drive()
+                folder_id, sheet_id, template_id = await gs.initialize_user_drive()
                 
                 # Update user with first business
                 business_id = str(uuid.uuid4())

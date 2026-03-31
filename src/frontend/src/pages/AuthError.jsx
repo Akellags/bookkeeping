@@ -1,9 +1,10 @@
 import React from 'react';
 import { AlertCircle, ArrowLeft, RefreshCw, MessageSquare } from 'lucide-react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 
 const AuthError = () => {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const errorMsg = searchParams.get('message') || 'We encountered an issue while connecting to your Google account.';
 
   return (
@@ -34,7 +35,7 @@ const AuthError = () => {
 
         <div className="flex flex-col space-y-3">
           <button 
-            onClick={() => window.location.href = '/'}
+            onClick={() => navigate('/')}
             className="flex items-center justify-center space-x-2 bg-blue-600 text-white font-bold py-4 rounded-2xl shadow-lg shadow-blue-100 hover:bg-blue-700 transition transform active:scale-95"
           >
             <ArrowLeft size={18} />

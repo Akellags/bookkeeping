@@ -1,17 +1,16 @@
 import os
+from dotenv import load_dotenv
+load_dotenv()
+
 import logging
 import json
 from fastapi import FastAPI, Request, Response, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from dotenv import load_dotenv
 
 from src.api import auth, frontend, whatsapp
 from src.scheduler import init_scheduler
-
-# Load environment variables
-load_dotenv()
 
 # Configure logging
 logging.basicConfig(
@@ -47,6 +46,11 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 @app.on_event("startup")
 async def startup_event():
     """Initializes background tasks on server start"""
+    # Ensure temporary media directory exists
+    if not os.path.exists("temp_media"):
+        os.makedirs("temp_media")
+        logger.info("Created temp_media directory")
+        
     init_scheduler()
     logger.info("Application startup complete.")
 

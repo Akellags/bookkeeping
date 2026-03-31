@@ -10,7 +10,8 @@ logger = logging.getLogger(__name__)
 class ConsultantAgent:
     def __init__(self):
         self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        self.model = "gpt-4o-mini"
+        # Fallback to gpt-4o-mini if env is not set
+        self.model = os.getenv("OPENAI_MODEL_NAME", "gpt-4o-mini")
         self.system_prompt = """
         Role: You are 'Help U Expert', a high-level Business Consultant for Indian Traders and SMEs.
         

@@ -1,11 +1,14 @@
 import os
 import logging
 import uuid
+import json
+import time
+from datetime import datetime
 from sqlalchemy.orm import Session
 from src.db_service import User, Business, Transaction
 from src.utils import (
     send_whatsapp_text, send_whatsapp_interactive, get_whatsapp_media_url, 
-    download_whatsapp_media, is_valid_gstin
+    download_whatsapp_media, is_valid_gstin, upload_whatsapp_media, send_whatsapp_document
 )
 from src.ai_processor import AIProcessor
 from src.transcription_service import TranscriptionService
@@ -28,7 +31,7 @@ async def handle_command(db: Session, user: User, business: Business, message_da
         audio_id = message_data.get("audio", {}).get("id")
         media_url = get_whatsapp_media_url(audio_id)
         if media_url:
-            local_path = f"temp_{audio_id}.ogg"
+            local_path = os.path.join("temp_media", f"audio_{audio_id}.ogg")
             download_whatsapp_media(media_url, local_path)
             text, _ = transcription_service.transcribe_audio(local_path)
             if os.path.exists(local_path):
@@ -64,6 +67,14 @@ async def handle_command(db: Session, user: User, business: Business, message_da
     elif text_lower == "analysis" and business:
         return await _handle_analysis_command(user, business)
     
+    elif text_lower == "gstr1" and business:
+        return await _handle_gstr1_command(user, business)
+
+    elif text_lower == "ledger" and business:
+        sheet_url = f"https://docs.google.com/spreadsheets/d/{business.master_ledger_sheet_id}"
+        send_whatsapp_text(user.whatsapp_id, f"📖 Your Master Ledger is here: {sheet_url}")
+        return {"status": "ledger_sent"}
+
     elif text_lower == "advice":
         send_whatsapp_text(user_whatsapp_id, "I'm ready! Ask me anything about your business performance, GST, or cash flow. (e.g., 'How can I improve my margins?')")
         user.last_interaction_type = "AWAITING_ADVICE"
@@ -92,12 +103,20 @@ async def _handle_awaiting_duedate(db: Session, user: User, business: Business, 
         return {"status": "error_no_data"}
     row_index = user.last_interaction_data.get("row_index")
     old_row = user.last_interaction_data.get("old_row")
+    final_type = user.last_interaction_data.get("transaction_type", "Sale")
     
     new_row = list(old_row)
-    new_row[20] = text # Column U: Due Date
+    if final_type == "Payment":
+        due_idx = 5     # "Next Due Date" in _get_payment_headers
+        sheet_name = "Payments"
+    else:
+        due_idx = 20    # "Due Date" in _get_ledger_headers
+        sheet_name = {"Sale": "Sales", "Purchase": "Purchases", "Expense": "Expenses"}.get(final_type, "Sales")
+
+    new_row[due_idx] = text 
     
     gs = GoogleService(user.google_refresh_token)
-    await gs.update_ledger_row(business.master_ledger_sheet_id, row_index, new_row)
+    await gs.update_ledger_row(business.master_ledger_sheet_id, row_index, new_row, sheet_name=sheet_name)
     
     user.last_interaction_type = None
     user.last_interaction_data = None
@@ -169,17 +188,20 @@ async def _handle_awaiting_edit(db: Session, user: User, business: Business, tex
 
 async def _handle_stats_command(user: User, business: Business):
     gs = GoogleService(user.google_refresh_token)
-    summary = await gs.get_business_summary(business.master_ledger_sheet_id)
-    if not summary:
-        send_whatsapp_text(user.whatsapp_id, "I don't have enough data yet to show stats.")
+    stats = await gs.get_ledger_stats(business.master_ledger_sheet_id)
+    if not stats or stats.get("count") == 0:
+        send_whatsapp_text(user.whatsapp_id, "I don't have enough data yet to show stats. Record a few bills first!")
         return {"status": "no_data"}
     
     msg = (
         f"📊 *Monthly Stats for {business.business_name}*\n\n"
-        f"💰 Total Sales: ₹{summary.get('total_sales', 0):,.2f}\n"
-        f"💸 Total Purchases: ₹{summary.get('total_purchases', 0):,.2f}\n"
-        f"🏠 Total Expenses: ₹{summary.get('total_expenses', 0):,.2f}\n"
-        f"💳 Total Payments: ₹{summary.get('total_payments', 0):,.2f}\n\n"
+        f"💰 Total Sales: ₹{stats.get('total_sales', 0):,.2f}\n"
+        f"💸 Total Purchases: ₹{stats.get('total_purchases', 0):,.2f}\n"
+        f"🏠 Total Expenses: ₹{stats.get('total_expenses', 0):,.2f}\n"
+        f"   - Paid: ₹{stats.get('paid_expenses', 0):,.2f}\n"
+        f"   - Unpaid: ₹{stats.get('unpaid_expenses', 0):,.2f}\n"
+        f"💳 Total Payments: ₹{stats.get('total_payments', 0):,.2f}\n\n"
+        f"📄 Total Records: {stats.get('count', 0)}\n\n"
         "Keep up the good work! 🚀"
     )
     send_whatsapp_text(user.whatsapp_id, msg)
@@ -195,6 +217,39 @@ async def _handle_analysis_command(user: User, business: Business):
     analysis_text = consultant_agent.analyze_business(summary, "Provide a general business analysis for this month.")
     send_whatsapp_text(user.whatsapp_id, analysis_text)
     return {"status": "analysis_sent"}
+
+async def _handle_gstr1_command(user: User, business: Business):
+    """Generates and sends GSTR-1 JSON report for current month"""
+    try:
+        gs = GoogleService(user.google_refresh_token)
+        user_gstin = business.business_gstin or "37ABCDE1234F1Z5"
+        fp = datetime.now().strftime("%m%Y")
+        
+        gstr1_data = await gs.generate_gstr1_json(business.master_ledger_sheet_id, user_gstin, fp)
+        if not gstr1_data:
+            send_whatsapp_text(user.whatsapp_id, "I couldn't find any Sales data for this month to generate GSTR-1.")
+            return {"status": "no_data"}
+
+        # Create temp file
+        file_name = f"GSTR1_{fp}_{business.id[:6]}.json"
+        temp_path = os.path.join("temp_media", f"report_{file_name}")
+        with open(temp_path, "w") as f:
+            json.dump(gstr1_data, f, indent=2)
+
+        # Upload and Send
+        media_id = upload_whatsapp_media(temp_path)
+        if media_id:
+            send_whatsapp_document(user.whatsapp_id, media_id, file_name)
+            send_whatsapp_text(user.whatsapp_id, "✅ Here is your GSTR-1 JSON report for the current month. You can upload this directly to the GST portal.")
+        else:
+            send_whatsapp_text(user.whatsapp_id, "Sorry, I had trouble uploading the report. Please try again from the dashboard.")
+        
+        if os.path.exists(temp_path): os.remove(temp_path)
+        return {"status": "gstr1_sent"}
+    except Exception as e:
+        logger.error(f"Error in GSTR1 command: {e}")
+        send_whatsapp_text(user.whatsapp_id, "Failed to generate GSTR-1 report.")
+        return {"status": "error"}
 
 async def _handle_switch_command(db: Session, user: User):
     businesses = db.query(Business).filter(Business.user_whatsapp_id == user.whatsapp_id).all()

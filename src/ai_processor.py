@@ -11,7 +11,8 @@ logger = logging.getLogger(__name__)
 class AIProcessor:
     def __init__(self):
         self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        self.model = "gpt-4o-mini"
+        # Fallback to gpt-4o-mini if env is not set, as it is a stable known model
+        self.model = os.getenv("OPENAI_MODEL_NAME", "gpt-4o-mini")
         self.system_prompt = """
         Role: You are a specialist Indian GST Compliance Accountant. 
         Task: Analyze the provided image (bill) or text/voice transcript (sale) and extract data into a strict JSON format. 
@@ -105,6 +106,20 @@ class AIProcessor:
             return json.loads(response.choices[0].message.content)
         except Exception as e:
             logger.error(f"Error processing purchase image: {e}")
+            return None
+
+    def transcribe_audio(self, audio_file_path: str):
+        """Transcribes audio using Whisper API"""
+        try:
+            with open(audio_file_path, "rb") as audio_file:
+                transcript = self.client.audio.transcriptions.create(
+                    model="whisper-1", 
+                    file=audio_file,
+                    response_format="text"
+                )
+            return transcript
+        except Exception as e:
+            logger.error(f"Error transcribing audio: {e}")
             return None
 
     def process_sales_text(self, text: str):

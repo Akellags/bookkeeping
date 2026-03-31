@@ -22,11 +22,15 @@ async def handle_interactive(db: Session, user: User, business: Business, messag
     """Handles interactive responses (buttons and lists)"""
     user_whatsapp_id = user.whatsapp_id
     interactive = message_data.get("interactive", {})
-    if interactive.get("type") != "button_reply":
+    type = interactive.get("type")
+    
+    if type == "button_reply":
+        button_title = interactive.get("button_reply", {}).get("title")
+    elif type == "list_reply":
+        button_title = interactive.get("list_reply", {}).get("title")
+    else:
         return {"status": "unsupported_interactive"}
 
-    button_title = interactive.get("button_reply", {}).get("title")
-    
     # 1. Handle Business Switch
     target_business = db.query(Business).filter(
         Business.user_whatsapp_id == user_whatsapp_id,
@@ -107,17 +111,28 @@ async def _handle_payment_status(db: Session, user: User, business: Business, st
     try:
         gs = GoogleService(user.google_refresh_token)
         new_row = list(old_row)
-        # 19 is status, 20 is due_date
-        new_row[19] = status 
+        final_type = data.get("transaction_type", "Sale")
+        
+        # Column mapping based on sheet type
+        if final_type == "Payment":
+            status_idx = 6  # "Status" in _get_payment_headers
+            due_idx = 5     # "Next Due Date"
+            sheet_name = "Payments"
+        else:
+            status_idx = 19 # "Payment Status" in _get_ledger_headers
+            due_idx = 20    # "Due Date"
+            sheet_name = {"Sale": "Sales", "Purchase": "Purchases", "Expense": "Expenses"}.get(final_type, "Sales")
+
+        new_row[status_idx] = "Completed" if status == "Paid" else "Credit" 
         
         if status == "Paid":
-            new_row[20] = "N/A"
-            await gs.update_ledger_row(business.master_ledger_sheet_id, row_index, new_row)
+            new_row[due_idx] = "N/A"
+            await gs.update_ledger_row(business.master_ledger_sheet_id, row_index, new_row, sheet_name=sheet_name)
             send_whatsapp_text(user.whatsapp_id, "✅ Marked as Paid!")
         else:
             # For Credit, we need a Due Date
             user.last_interaction_type = "AWAITING_DUE_DATE"
-            user.last_interaction_data = {"row_index": row_index, "row": new_row}
+            user.last_interaction_data = {"row_index": row_index, "row": new_row, "transaction_type": final_type}
             send_whatsapp_text(user.whatsapp_id, "Please enter the *Due Date* for this payment (e.g., '10th April' or 'In 5 days'):")
     
         db.commit()
@@ -187,6 +202,7 @@ async def _handle_type_selection(db: Session, user: User, business: Business, tx
         tx.transaction_type = button_title
         # Check if we have extraction data (fresh start from menu)
         if not tx.extracted_json or "total_amount" not in tx.extracted_json:
+            logger.info(f"Setting transaction {tx.id} status to AWAITING_DETAILS for {button_title}")
             tx.status = "AWAITING_DETAILS"
             db.commit()
             send_whatsapp_text(user.whatsapp_id, f"Great! Please send a photo of the {button_title} bill or type the details (e.g., '{button_title} of 500').")
@@ -283,13 +299,20 @@ async def _handle_confirmation(db: Session, user: User, business: Business, tx: 
     
     # AI Extraction for images
     if tx.media_url and os.path.exists(tx.media_url) and (not extraction or "total_amount" not in extraction):
-        with open(tx.media_url, "rb") as image_file:
-            encoded_image = base64.b64encode(image_file.read()).decode('utf-8')
-            image_data_uri = f"data:image/jpeg;base64,{encoded_image}"
-            extraction = ai_processor.process_purchase_image(image_data_uri)
-            if extraction:
-                tx.extracted_json = extraction
-                db.commit()
+        logger.info(f"Interactive: Starting AI extraction for tx {tx.id} using {tx.media_url}")
+        try:
+            with open(tx.media_url, "rb") as image_file:
+                encoded_image = base64.b64encode(image_file.read()).decode('utf-8')
+                image_data_uri = f"data:image/jpeg;base64,{encoded_image}"
+                extraction = ai_processor.process_purchase_image(image_data_uri)
+                if extraction:
+                    logger.info(f"Interactive: AI Extraction successful for tx {tx.id}")
+                    tx.extracted_json = extraction
+                    db.commit()
+                else:
+                    logger.warning(f"Interactive: AI Extraction returned None for tx {tx.id}")
+        except Exception as e:
+            logger.error(f"Interactive: Error during AI extraction: {e}")
 
     if not extraction:
         send_whatsapp_text(user.whatsapp_id, "Failed to extract data. Please try again.")
@@ -449,7 +472,7 @@ async def _finalize_transaction(db: Session, user: User, business: Business, tx:
 
         tx.status = "COMPLETED"
         user.last_interaction_type = "AWAITING_PAYMENT"
-        user.last_interaction_data = {"row_index": last_index, "old_row": row}
+        user.last_interaction_data = {"row_index": last_index, "old_row": row, "transaction_type": final_type}
         db.commit()
         
         send_whatsapp_text(user.whatsapp_id, f"✅ Recorded as {final_type}!")

@@ -28,4 +28,5 @@ help_u_bookkeeper.db
 temp_*.jpg
 temp_*.ogg
 temp_*.m4a
+temp_media/
 logs/
