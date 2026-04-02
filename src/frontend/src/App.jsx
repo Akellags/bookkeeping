@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, Outlet } from 'react-router-dom';
 import axios from 'axios';
+import { Loader2 } from 'lucide-react';
 import { UserProvider, useUser } from './context/UserContext';
 import Layout from './components/Layout';
 import LandingPage from './pages/LandingPage';
@@ -16,7 +17,15 @@ const ProtectedRoute = () => {
   const { whatsappId, loading } = useUser();
   const location = useLocation();
 
-  if (loading) return null; // Or a loader
+  // Only show a white screen if we are truly loading the initial auth state
+  // and we don't have a whatsappId in memory yet
+  if (loading && !whatsappId) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-white">
+        <Loader2 className="w-10 h-10 text-blue-600 animate-spin" />
+      </div>
+    );
+  }
 
   if (!whatsappId) {
     return <Navigate to="/" state={{ from: location }} replace />;

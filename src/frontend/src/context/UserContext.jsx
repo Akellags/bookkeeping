@@ -9,20 +9,19 @@ export const UserProvider = ({ children }) => {
   const [userStats, setUserStats] = useState(null);
   const [businesses, setBusinesses] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [statsLoading, setStatsLoading] = useState(false);
   const [whatsappId, setWhatsappId] = useState(localStorage.getItem('whatsapp_id'));
 
   const fetchUserStats = async (id = whatsappId) => {
-    if (!isValidId(id)) {
-      setLoading(false);
-      return;
-    }
+    if (!isValidId(id)) return;
+    setStatsLoading(true);
     try {
       const response = await axios.get(`/api/user/stats?whatsapp_id=${id}`);
       setUserStats(response.data);
     } catch (error) {
       console.error('Error fetching user stats:', error);
     } finally {
-      setLoading(false);
+      setStatsLoading(false);
     }
   };
 
@@ -52,9 +51,8 @@ export const UserProvider = ({ children }) => {
     if (isValidId(whatsappId)) {
       fetchUserStats();
       fetchBusinesses();
-    } else {
-      setLoading(false);
     }
+    setLoading(false);
   }, [whatsappId]);
 
   return (
@@ -62,6 +60,7 @@ export const UserProvider = ({ children }) => {
       userStats, 
       businesses, 
       loading, 
+      statsLoading,
       whatsappId, 
       fetchUserStats, 
       fetchBusinesses, 

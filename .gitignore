@@ -23,6 +23,11 @@ dist/
 .idea/
 *.swp
 
+# Credentials and Proxy
+google_creds.json
+cloud-sql-proxy.exe
+response.json
+
 # Application
 help_u_bookkeeper.db
 temp_*.jpg

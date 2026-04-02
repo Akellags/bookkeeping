@@ -3,6 +3,7 @@ import requests
 import logging
 import jwt
 import re
+from pdf2image import convert_from_path
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
@@ -12,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 META_ACCESS_TOKEN = os.getenv("META_ACCESS_TOKEN")
 SECRET_KEY = os.getenv("SECRET_KEY", "your-fallback-secret-key-for-dev")
+POPPLER_PATH = os.getenv("POPPLER_PATH") # Optional for Windows testing
 
 def sign_state(whatsapp_id: str) -> str:
     """Signs the whatsapp_id into a JWT to prevent spoofing during OAuth"""
@@ -327,4 +329,38 @@ def convert_image_to_pdf(image_path: str, pdf_path: str):
         return pdf_path
     except Exception as e:
         logger.error(f"Error converting image to PDF: {e}")
+        return None
+
+def convert_pdf_to_image(pdf_path: str) -> str:
+    """Converts the first page of a PDF to a JPG image for Vision analysis"""
+    try:
+        images = convert_from_path(
+            pdf_path, 
+            first_page=1, 
+            last_page=1, 
+            poppler_path=POPPLER_PATH
+        )
+        if images:
+            image_path = pdf_path.replace(".pdf", ".jpg")
+            images[0].save(image_path, "JPEG")
+            return image_path
+    except Exception as e:
+        logger.error(f"Error converting PDF to image: {e}")
+    return None
+
+def extract_text_from_pdf(pdf_path: str) -> str:
+    """Extracts text content from a PDF file using PyPDF2"""
+    try:
+        import PyPDF2
+        text = ""
+        with open(pdf_path, "rb") as f:
+            reader = PyPDF2.PdfReader(f)
+            for page_num in range(len(reader.pages)):
+                page = reader.pages[page_num]
+                page_text = page.extract_text()
+                if page_text:
+                    text += page_text + "\n"
+        return text.strip()
+    except Exception as e:
+        logger.error(f"Error extracting text from PDF {pdf_path}: {e}")
         return None

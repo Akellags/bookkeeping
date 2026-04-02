@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { 
   MessageCircle, 
   ShieldCheck, 
@@ -16,6 +16,7 @@ const isValidId = (id) => id && id !== 'null' && id !== 'undefined' && id.trim()
 
 const LandingPage = () => {
   const [isRegistered, setIsRegistered] = useState(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
     const whatsappId = localStorage.getItem('whatsapp_id');
@@ -25,6 +26,17 @@ const LandingPage = () => {
       setIsRegistered(false);
     }
   }, []);
+
+  const handleDashboardClick = (e) => {
+    e.preventDefault();
+    const whatsappId = localStorage.getItem('whatsapp_id');
+    if (isValidId(whatsappId)) {
+      // Force navigation to dashboard
+      window.location.href = '/dashboard';
+    } else {
+      window.location.href = '/auth/google?whatsapp_id=new_user';
+    }
+  };
 
   return (
     <div className="bg-white font-inter text-gray-900 overflow-x-hidden">
@@ -41,9 +53,12 @@ const LandingPage = () => {
         </div>
         <div className="flex items-center space-x-4">
           {isRegistered ? (
-            <Link to="/dashboard" className="bg-blue-600 text-white px-6 py-3 rounded-xl text-sm font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 transition transform hover:scale-105 active:scale-95">
+            <button 
+              onClick={handleDashboardClick}
+              className="bg-blue-600 text-white px-6 py-3 rounded-xl text-sm font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 transition transform hover:scale-105 active:scale-95"
+            >
               Dashboard
-            </Link>
+            </button>
           ) : (
             <>
               <a href="/auth/google?whatsapp_id=new_user" className="text-sm font-bold text-gray-700 hover:text-blue-600 transition">Sign In</a>
@@ -70,10 +85,13 @@ const LandingPage = () => {
           </p>
           <div className="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4">
             {isRegistered ? (
-              <Link to="/dashboard" className="flex items-center justify-center space-x-2 bg-blue-600 text-white px-8 py-5 rounded-2xl text-lg font-bold shadow-xl shadow-blue-200 hover:bg-blue-700 transition transform hover:scale-105">
+              <button 
+                onClick={handleDashboardClick}
+                className="flex items-center justify-center space-x-2 bg-blue-600 text-white px-8 py-5 rounded-2xl text-lg font-bold shadow-xl shadow-blue-200 hover:bg-blue-700 transition transform hover:scale-105"
+              >
                 <span>Open Dashboard</span>
                 <ArrowRight size={20} />
-              </Link>
+              </button>
             ) : (
               <a href="/auth/google?whatsapp_id=new_user" className="flex items-center justify-center space-x-2 bg-blue-600 text-white px-8 py-5 rounded-2xl text-lg font-bold shadow-xl shadow-blue-200 hover:bg-blue-700 transition transform hover:scale-105">
                 <span>Try Help U Now</span>

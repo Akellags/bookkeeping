@@ -5,15 +5,49 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
 from dotenv import load_dotenv
+from google.cloud.sql.connector import Connector, IPTypes
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# Use SQLite for local development, fallback to PostgreSQL in production
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./help_u_bookkeeper.db")
+# Cloud SQL Python Connector configuration
+INSTANCE_CONNECTION_NAME = os.getenv("INSTANCE_CONNECTION_NAME")
+DB_USER = os.getenv("DB_USER")
+DB_PASS = os.getenv("DB_PASS")
+DB_NAME = os.getenv("DB_NAME")
 
-engine = create_engine(DATABASE_URL)
+def get_engine():
+    # Use Connector if connection details are provided
+    if INSTANCE_CONNECTION_NAME and DB_USER and DB_PASS:
+        logger.info(f"Connecting to Cloud SQL via Python Connector: {INSTANCE_CONNECTION_NAME}")
+        
+        # This will use GOOGLE_APPLICATION_CREDENTIALS env var if set, 
+        # or fall back to ADC (gcloud auth application-default login)
+        connector = Connector()
+        
+        def getconn():
+            conn = connector.connect(
+                INSTANCE_CONNECTION_NAME,
+                "pg8000",
+                user=DB_USER,
+                password=DB_PASS,
+                db=DB_NAME,
+                ip_type=IPTypes.PUBLIC  # Use PUBLIC for local dev without private networking
+            )
+            return conn
+
+        return create_engine(
+            "postgresql+pg8000://",
+            creator=getconn,
+        )
+    else:
+        # Fallback to local SQLite or standard DATABASE_URL
+        db_url = os.getenv("DATABASE_URL", "sqlite:///./help_u_bookkeeper.db")
+        logger.info(f"Connecting to database via URL: {db_url}")
+        return create_engine(db_url)
+
+engine = get_engine()
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -67,8 +101,10 @@ class ProcessedMessage(Base):
     message_id = Column(String, primary_key=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-# Create tables
-Base.metadata.create_all(bind=engine)
+# Tables should be created via Alembic migrations in production.
+# For local SQLite development, you can still call Base.metadata.create_all(bind=engine) 
+# but it's better to use migrations for everything now.
+# Base.metadata.create_all(bind=engine) 
 
 def get_db():
     db = SessionLocal()

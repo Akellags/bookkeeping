@@ -16,7 +16,10 @@ import stripe
 from src.db_service import get_db, User, Business, Transaction, SessionLocal
 from src.ai_processor import AIProcessor
 from src.google_service import GoogleService
-from src.utils import get_state_code, get_uqc_code, upload_whatsapp_media
+from src.utils import (
+    get_state_code, get_uqc_code, upload_whatsapp_media, 
+    extract_text_from_pdf, convert_pdf_to_image
+)
 
 logger = logging.getLogger(__name__)
 
@@ -209,23 +212,42 @@ async def process_image_fe(
     file: UploadFile = File(...), 
     db: Session = Depends(get_db)
 ):
-    """Processes an uploaded bill image for the frontend"""
+    """Processes an uploaded bill image or PDF for the frontend"""
     user = db.query(User).filter(User.whatsapp_id == whatsapp_id).first()
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
     
     # Save temporary file
     temp_id = str(uuid.uuid4())
-    temp_path = f"temp_{temp_id}.jpg"
+    ext = os.path.splitext(file.filename)[1].lower() or ".jpg"
+    temp_path = os.path.join("temp_media", f"fe_{temp_id}{ext}")
+    
     with open(temp_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     
     try:
+        extraction = None
         # Process with AI
-        with open(temp_path, "rb") as image_file:
-            encoded_image = base64.b64encode(image_file.read()).decode('utf-8')
-            image_data_uri = f"data:image/jpeg;base64,{encoded_image}"
-            extraction = ai_processor.process_purchase_image(image_data_uri)
+        if ext in [".jpg", ".jpeg", ".png"]:
+            with open(temp_path, "rb") as image_file:
+                encoded_image = base64.b64encode(image_file.read()).decode('utf-8')
+                image_data_uri = f"data:image/jpeg;base64,{encoded_image}"
+                extraction = ai_processor.process_purchase_image(image_data_uri)
+        elif ext == ".pdf":
+            # Convert PDF to Image for Vision analysis
+            image_path = convert_pdf_to_image(temp_path)
+            if image_path:
+                with open(image_path, "rb") as image_file:
+                    encoded_image = base64.b64encode(image_file.read()).decode('utf-8')
+                    image_data_uri = f"data:image/jpeg;base64,{encoded_image}"
+                    extraction = ai_processor.process_purchase_image(image_data_uri)
+                # Cleanup temp image
+                if os.path.exists(image_path): os.remove(image_path)
+            else:
+                # Fallback to text extraction
+                pdf_text = extract_text_from_pdf(temp_path)
+                if pdf_text:
+                    extraction = ai_processor.process_sales_text(f"Extract GST data from this bill PDF content: {pdf_text}")
         
         if not extraction:
             raise HTTPException(status_code=500, detail="AI extraction failed")
@@ -247,7 +269,7 @@ async def process_image_fe(
     except Exception as e:
         if os.path.exists(temp_path):
             os.remove(temp_path)
-        logger.error(f"Error processing image: {e}")
+        logger.error(f"Error processing file: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/transactions/process-text")
@@ -394,33 +416,47 @@ async def save_transaction_fe(
             await gs.append_to_master_ledger(business.master_ledger_sheet_id, payment_row, sheet_name="Payments")
         else:
             # 5. Ledger Row Preparation (Sale, Purchase, Expense)
-            # Schema from GoogleService._get_ledger_headers (21 columns)
-            row = [
-                party_gstin,             # 0: Recipient GSTIN
-                party_name,              # 1: Receiver Name
-                invoice_no,              # 2: Invoice Number
-                date,                    # 3: Invoice date
-                total_amount,            # 4: Invoice Value
-                get_state_code(place_of_supply), # 5: Place Of Supply
-                extraction.get("reverse_charge", "N"), # 6: Reverse Charge
-                "B2B" if party_gstin else "B2CS", # 7: Invoice Type
-                final_type,              # 8: Transaction Type
-                extraction.get("hsn_code", ""), # 9: HSN Code
-                extraction.get("hsn_description", ""), # 10: HSN Description
-                get_uqc_code(extraction.get("uqc", "OTH")), # 11: UQC
-                extraction.get("quantity", 1), # 12: Quantity
-                gst_rate,                # 13: Rate
-                taxable_value,           # 14: Taxable Value
-                cgst,                    # 15: CGST
-                sgst,                    # 16: SGST
-                igst,                    # 17: IGST
-                0,                       # 18: Cess Amount
-                extraction.get("payment_mode", "Paid"), # 19: Payment Status
-                extraction.get("due_date", "") # 20: Due Date
-            ]
-            
+            # Support multiple items from frontend
+            items = extraction.get("items") or [{
+                "hsn_code": extraction.get("hsn_code", ""),
+                "hsn_description": extraction.get("hsn_description", ""),
+                "uqc": extraction.get("uqc", "OTH"),
+                "quantity": extraction.get("quantity", 1),
+                "gst_rate": gst_rate,
+                "taxable_value": taxable_value,
+                "cgst": cgst,
+                "sgst": sgst,
+                "igst": igst,
+                "total_amount": total_amount
+            }]
+
             gs = GoogleService(user.google_refresh_token)
-            await gs.append_to_master_ledger(business.master_ledger_sheet_id, row, sheet_name=final_type)
+            for item in items:
+                # Schema from GoogleService._get_ledger_headers (21 columns)
+                row = [
+                    party_gstin,             # 0: Recipient GSTIN
+                    party_name,              # 1: Receiver Name
+                    invoice_no,              # 2: Invoice Number
+                    date,                    # 3: Invoice date
+                    item.get("total_amount", 0), # 4: Invoice Value (Row Value)
+                    get_state_code(place_of_supply), # 5: Place Of Supply
+                    extraction.get("reverse_charge", "N"), # 6: Reverse Charge
+                    "B2B" if party_gstin else "B2CS", # 7: Invoice Type
+                    final_type,              # 8: Transaction Type
+                    item.get("hsn_code", ""), # 9: HSN Code
+                    item.get("hsn_description", ""), # 10: HSN Description
+                    get_uqc_code(item.get("uqc", "OTH")), # 11: UQC
+                    item.get("quantity", 1), # 12: Quantity
+                    item.get("gst_rate", 0), # 13: Rate
+                    item.get("taxable_value", 0), # 14: Taxable Value
+                    item.get("cgst", 0), # 15: CGST
+                    item.get("sgst", 0), # 16: SGST
+                    item.get("igst", 0), # 17: IGST
+                    0,                       # 18: Cess Amount
+                    extraction.get("payment_mode", "Paid"), # 19: Payment Status
+                    extraction.get("due_date", "") # 20: Due Date
+                ]
+                await gs.append_to_master_ledger(business.master_ledger_sheet_id, row, sheet_name=final_type)
         
         if data.media_url and os.path.exists(data.media_url):
             await gs.upload_bill_image(data.media_url, business.drive_folder_id)

@@ -65,6 +65,7 @@ class AIProcessor:
           "date": "DD-MM-YYYY",
           "vendor_name": "string",
           "vendor_gstin": "string",
+          "recipient_name": "string",
           "recipient_gstin": "string",
           "place_of_supply": "string (State name or 2-digit code)",
           "reverse_charge": "Y/N",

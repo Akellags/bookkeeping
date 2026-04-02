@@ -17,7 +17,7 @@ import { useUser } from '../context/UserContext';
 import TransactionDrawer from '../components/TransactionDrawer';
 
 const Dashboard = () => {
-  const { userStats: globalUserStats, whatsappId } = useUser();
+  const { userStats: globalUserStats, whatsappId, statsLoading: globalStatsLoading } = useUser();
   const navigate = useNavigate();
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -31,6 +31,7 @@ const Dashboard = () => {
         return;
       }
 
+      setLoading(true);
       let url = `/api/user/stats?whatsapp_id=${whatsappId}`;
       if (dateRange.start) url += `&start_date=${formatDate(dateRange.start)}`;
       if (dateRange.end) url += `&end_date=${formatDate(dateRange.end)}`;
@@ -56,15 +57,8 @@ const Dashboard = () => {
     setDrawerConfig({ isOpen: true, category });
   };
 
-  if (loading && !stats) {
-    return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <Loader2 className="w-10 h-10 text-blue-600 animate-spin" />
-      </div>
-    );
-  }
-
-  const userStats = stats || { bills: 0, sales: 0, purchases: 0, payments: 0, expenses: 0, expenses_paid: 0, expenses_unpaid: 0 };
+  const userStats = stats || globalUserStats || { bills: 0, sales: 0, purchases: 0, payments: 0, expenses: 0, expenses_paid: 0, expenses_unpaid: 0 };
+  const isCurrentlyLoading = loading || globalStatsLoading;
 
   return (
     <>
@@ -130,12 +124,12 @@ const Dashboard = () => {
         <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6 mb-10">
           <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 group relative">
             <p className="text-gray-400 text-sm font-medium mb-1">Bills Processed</p>
-            <p className="text-3xl font-bold text-gray-900">{userStats.bills}</p>
+            {isCurrentlyLoading && !stats ? <div className="h-9 w-16 bg-gray-100 animate-pulse rounded" /> : <p className="text-3xl font-bold text-gray-900">{userStats.bills}</p>}
           </div>
           
           <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 group relative hover:shadow-md transition">
             <p className="text-gray-400 text-sm font-medium mb-1">Total Sales</p>
-            <p className="text-2xl font-bold text-gray-900">₹{(userStats.sales || 0).toLocaleString()}</p>
+            {isCurrentlyLoading && !stats ? <div className="h-8 w-24 bg-gray-100 animate-pulse rounded" /> : <p className="text-2xl font-bold text-gray-900">₹{(userStats.sales || 0).toLocaleString()}</p>}
             <button 
               onClick={() => openDrawer('Sale')}
               className="absolute top-4 right-4 p-1.5 bg-blue-50 text-blue-600 rounded-lg opacity-0 group-hover:opacity-100 transition"
@@ -146,7 +140,7 @@ const Dashboard = () => {
 
           <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 group relative hover:shadow-md transition">
             <p className="text-gray-400 text-sm font-medium mb-1">Total Purchases</p>
-            <p className="text-2xl font-bold text-gray-900">₹{(userStats.purchases || 0).toLocaleString()}</p>
+            {isCurrentlyLoading && !stats ? <div className="h-8 w-24 bg-gray-100 animate-pulse rounded" /> : <p className="text-2xl font-bold text-gray-900">₹{(userStats.purchases || 0).toLocaleString()}</p>}
             <button 
               onClick={() => openDrawer('Purchase')}
               className="absolute top-4 right-4 p-1.5 bg-indigo-50 text-indigo-600 rounded-lg opacity-0 group-hover:opacity-100 transition"
@@ -157,7 +151,7 @@ const Dashboard = () => {
 
           <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 group relative hover:shadow-md transition">
             <p className="text-gray-400 text-sm font-medium mb-1">Total Payments</p>
-            <p className="text-2xl font-bold text-gray-900">₹{(userStats.payments || 0).toLocaleString()}</p>
+            {isCurrentlyLoading && !stats ? <div className="h-8 w-24 bg-gray-100 animate-pulse rounded" /> : <p className="text-2xl font-bold text-gray-900">₹{(userStats.payments || 0).toLocaleString()}</p>}
             <button 
               onClick={() => openDrawer('Payment')}
               className="absolute top-4 right-4 p-1.5 bg-green-50 text-green-600 rounded-lg opacity-0 group-hover:opacity-100 transition"
@@ -168,11 +162,20 @@ const Dashboard = () => {
 
           <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 group relative hover:shadow-md transition overflow-hidden">
             <p className="text-gray-400 text-sm font-medium mb-1">Total Expenses</p>
-            <p className="text-2xl font-bold text-gray-900 mb-2">₹{(userStats.expenses || 0).toLocaleString()}</p>
-            <div className="flex gap-2 text-[10px] font-bold uppercase">
-              <span className="text-green-600 bg-green-50 px-1.5 py-0.5 rounded">P: ₹{(userStats.expenses_paid || 0).toLocaleString()}</span>
-              <span className="text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded">C: ₹{(userStats.expenses_unpaid || 0).toLocaleString()}</span>
-            </div>
+            {isCurrentlyLoading && !stats ? (
+              <div className="space-y-2">
+                <div className="h-8 w-24 bg-gray-100 animate-pulse rounded" />
+                <div className="h-4 w-32 bg-gray-50 animate-pulse rounded" />
+              </div>
+            ) : (
+              <>
+                <p className="text-2xl font-bold text-gray-900 mb-2">₹{(userStats.expenses || 0).toLocaleString()}</p>
+                <div className="flex gap-2 text-[10px] font-bold uppercase">
+                  <span className="text-green-600 bg-green-50 px-1.5 py-0.5 rounded">P: ₹{(userStats.expenses_paid || 0).toLocaleString()}</span>
+                  <span className="text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded">C: ₹{(userStats.expenses_unpaid || 0).toLocaleString()}</span>
+                </div>
+              </>
+            )}
             <button 
               onClick={() => openDrawer('Expense')}
               className="absolute top-4 right-4 p-1.5 bg-orange-50 text-orange-600 rounded-lg opacity-0 group-hover:opacity-100 transition"

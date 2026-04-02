@@ -1,0 +1,17 @@
+.venv
+venv
+__pycache__
+*.db
+.env
+.git
+.gitignore
+google_creds.json
+Dockerfile
+.dockerignore
+docs/
+tests/
+temp_media/
+logs/
+alembic/
+alembic.ini
+migrate_to_postgresql.py

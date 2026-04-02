@@ -704,12 +704,19 @@ class GoogleService:
         return summary
 
     async def upload_bill_image(self, file_path: str, folder_id: str):
-        """Uploads an image file to Google Drive"""
+        """Uploads an image or PDF file to Google Drive"""
         if not os.path.exists(file_path): return None
         file_name = os.path.basename(file_path)
         with open(file_path, "rb") as f:
             content = f.read()
-        return await self.upload_file_to_drive(folder_id, file_name, content, mime_type="image/jpeg")
+        
+        mime_type = "image/jpeg"
+        if file_name.lower().endswith(".pdf"):
+            mime_type = "application/pdf"
+        elif file_name.lower().endswith(".png"):
+            mime_type = "image/png"
+            
+        return await self.upload_file_to_drive(folder_id, file_name, content, mime_type=mime_type)
 
     async def generate_sales_invoice(self, template_id: str, data: dict, folder_id: str):
         """Generates a doc from template, replaces placeholders, and saves it in folder_id"""

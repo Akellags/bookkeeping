@@ -9,7 +9,8 @@ from src.db_service import User, Business, Transaction
 from src.utils import (
     send_whatsapp_text, send_whatsapp_interactive, upload_whatsapp_media, 
     send_whatsapp_document, convert_image_to_pdf, is_valid_gstin, 
-    get_state_code, get_uqc_code, handle_google_error
+    get_state_code, get_uqc_code, handle_google_error, extract_text_from_pdf,
+    convert_pdf_to_image
 )
 from src.ai_processor import AIProcessor
 from src.google_service import GoogleService
@@ -297,20 +298,40 @@ async def _handle_confirmation(db: Session, user: User, business: Business, tx: 
     extraction = tx.extracted_json
     final_type = tx.transaction_type or "Sale"
     
-    # AI Extraction for images
+    # AI Extraction for media (images or PDFs)
     if tx.media_url and os.path.exists(tx.media_url) and (not extraction or "total_amount" not in extraction):
         logger.info(f"Interactive: Starting AI extraction for tx {tx.id} using {tx.media_url}")
         try:
-            with open(tx.media_url, "rb") as image_file:
-                encoded_image = base64.b64encode(image_file.read()).decode('utf-8')
-                image_data_uri = f"data:image/jpeg;base64,{encoded_image}"
-                extraction = ai_processor.process_purchase_image(image_data_uri)
-                if extraction:
-                    logger.info(f"Interactive: AI Extraction successful for tx {tx.id}")
-                    tx.extracted_json = extraction
-                    db.commit()
+            if tx.media_url.lower().endswith((".jpg", ".jpeg", ".png")):
+                # Handle Image
+                with open(tx.media_url, "rb") as image_file:
+                    encoded_image = base64.b64encode(image_file.read()).decode('utf-8')
+                    image_data_uri = f"data:image/jpeg;base64,{encoded_image}"
+                    extraction = ai_processor.process_purchase_image(image_data_uri)
+            elif tx.media_url.lower().endswith(".pdf"):
+                # Handle PDF via Vision by converting to Image
+                logger.info(f"Converting PDF to image for Vision: {tx.media_url}")
+                image_path = convert_pdf_to_image(tx.media_url)
+                if image_path:
+                    with open(image_path, "rb") as image_file:
+                        encoded_image = base64.b64encode(image_file.read()).decode('utf-8')
+                        image_data_uri = f"data:image/jpeg;base64,{encoded_image}"
+                        extraction = ai_processor.process_purchase_image(image_data_uri)
+                    # Cleanup temp image but keep PDF
+                    if os.path.exists(image_path): os.remove(image_path)
                 else:
-                    logger.warning(f"Interactive: AI Extraction returned None for tx {tx.id}")
+                    logger.warning(f"Could not convert PDF to image for Vision: {tx.media_url}")
+                    # Fallback to text extraction if vision conversion fails
+                    pdf_text = extract_text_from_pdf(tx.media_url)
+                    if pdf_text:
+                        extraction = ai_processor.process_sales_text(f"Extract GST data from this bill PDF content: {pdf_text}")
+            
+            if extraction:
+                logger.info(f"Interactive: AI Extraction successful for tx {tx.id}")
+                tx.extracted_json = extraction
+                db.commit()
+            else:
+                logger.warning(f"Interactive: AI Extraction returned None for tx {tx.id}")
         except Exception as e:
             logger.error(f"Interactive: Error during AI extraction: {e}")
 
