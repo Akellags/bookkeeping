@@ -1,20 +1,23 @@
 import React, { useEffect } from 'react';
 import { CheckCircle2, Folder, Table, ArrowRight, LayoutDashboard, MessageCircle } from 'lucide-react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useUser } from '../context/UserContext';
 
 const OnboardingSuccess = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const { login } = useUser();
   const whatsappId = searchParams.get('whatsapp_id');
+  const token = searchParams.get('token');
   const linkToken = searchParams.get('link_token');
 
   const botNumber = import.meta.env.VITE_WHATSAPP_BOT_NUMBER || "919000000000";
 
   useEffect(() => {
     if (whatsappId && whatsappId !== 'null' && whatsappId !== 'undefined') {
-      localStorage.setItem('whatsapp_id', whatsappId);
+      login(whatsappId, token);
     }
-  }, [whatsappId]);
+  }, [whatsappId, token, login]);
 
   const handleWhatsAppLink = () => {
     if (linkToken) {

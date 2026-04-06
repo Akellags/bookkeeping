@@ -3,6 +3,7 @@ import requests
 import logging
 import jwt
 import re
+from fastapi import Request, HTTPException
 from pdf2image import convert_from_path
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
@@ -14,6 +15,55 @@ logger = logging.getLogger(__name__)
 META_ACCESS_TOKEN = os.getenv("META_ACCESS_TOKEN")
 SECRET_KEY = os.getenv("SECRET_KEY", "your-fallback-secret-key-for-dev")
 POPPLER_PATH = os.getenv("POPPLER_PATH") # Optional for Windows testing
+
+def create_access_token(whatsapp_id: str, expires_delta: timedelta = None) -> str:
+    """Generates a long-term JWT for application session authentication"""
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        # Default session duration: 30 days for business apps
+        expire = datetime.utcnow() + timedelta(days=30)
+    
+    payload = {
+        "whatsapp_id": whatsapp_id,
+        "exp": expire,
+        "iat": datetime.utcnow(),
+        "type": "access_token"
+    }
+    return jwt.encode(payload, SECRET_KEY, algorithm="HS256")
+
+async def get_current_user(request: Request) -> str:
+    """FastAPI Dependency: Validates JWT from Authorization header or Query param"""
+    token = None
+    
+    # 1. Try to get token from Authorization: Bearer <token>
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ")[1]
+    
+    # 2. Fallback to query param for older frontend calls (transitional)
+    if not token:
+        token = request.query_params.get("token")
+        
+    if not token:
+        # For now, if no token, check if whatsapp_id is provided directly
+        # We will phase this out once the frontend is fully updated
+        wid = request.query_params.get("whatsapp_id")
+        if wid:
+             # logger.warning(f"Insecure access attempt with whatsapp_id: {wid}")
+             return wid
+        raise HTTPException(status_code=401, detail="Authentication token required")
+        
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+        whatsapp_id = payload.get("whatsapp_id")
+        if not whatsapp_id:
+            raise HTTPException(status_code=401, detail="Invalid token payload")
+        return whatsapp_id
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Session expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
 
 def sign_state(whatsapp_id: str) -> str:
     """Signs the whatsapp_id into a JWT to prevent spoofing during OAuth"""

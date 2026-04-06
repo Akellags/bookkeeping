@@ -18,7 +18,7 @@ from src.ai_processor import AIProcessor
 from src.google_service import GoogleService
 from src.utils import (
     get_state_code, get_uqc_code, upload_whatsapp_media, 
-    extract_text_from_pdf, convert_pdf_to_image
+    extract_text_from_pdf, convert_pdf_to_image, get_current_user
 )
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ class TransactionSave(BaseModel):
     media_url: Optional[str] = None
 
 @router.get("/user/stats")
-async def get_user_stats(whatsapp_id: str, start_date: str = None, end_date: str = None, db: Session = Depends(get_db)):
+async def get_user_stats(whatsapp_id: str = Depends(get_current_user), start_date: str = None, end_date: str = None, db: Session = Depends(get_db)):
     """Fetches real-time stats for the dashboard with optional date filtering"""
     user = db.query(User).filter(User.whatsapp_id == whatsapp_id).first()
     if not user or not user.google_refresh_token:
@@ -75,7 +75,7 @@ async def get_user_stats(whatsapp_id: str, start_date: str = None, end_date: str
     }
 
 @router.post("/user/settings")
-async def update_settings(whatsapp_id: str, settings: SettingsUpdate, db: Session = Depends(get_db)):
+async def update_settings(settings: SettingsUpdate, whatsapp_id: str = Depends(get_current_user), db: Session = Depends(get_db)):
     """Updates user business profile settings"""
     user = db.query(User).filter(User.whatsapp_id == whatsapp_id).first()
     if not user:
@@ -94,7 +94,7 @@ async def update_settings(whatsapp_id: str, settings: SettingsUpdate, db: Sessio
     return {"status": "success", "message": "Settings updated successfully"}
 
 @router.post("/billing/create-checkout-session")
-async def create_checkout_session(whatsapp_id: str, db: Session = Depends(get_db)):
+async def create_checkout_session(whatsapp_id: str = Depends(get_current_user), db: Session = Depends(get_db)):
     """Creates a Stripe Checkout Session for subscription"""
     try:
         user = db.query(User).filter(User.whatsapp_id == whatsapp_id).first()
@@ -144,7 +144,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
     return {"status": "success"}
 
 @router.get("/user/businesses")
-async def list_businesses(whatsapp_id: str, db: Session = Depends(get_db)):
+async def list_businesses(whatsapp_id: str = Depends(get_current_user), db: Session = Depends(get_db)):
     """Lists all businesses linked to a WhatsApp ID"""
     user = db.query(User).filter(User.whatsapp_id == whatsapp_id).first()
     if not user:
@@ -164,7 +164,7 @@ async def list_businesses(whatsapp_id: str, db: Session = Depends(get_db)):
     }
 
 @router.post("/user/businesses/switch")
-async def switch_business(whatsapp_id: str, business_id: str, db: Session = Depends(get_db)):
+async def switch_business(business_id: str, whatsapp_id: str = Depends(get_current_user), db: Session = Depends(get_db)):
     """Switches the active business for a user"""
     user = db.query(User).filter(User.whatsapp_id == whatsapp_id).first()
     if not user:
@@ -179,7 +179,7 @@ async def switch_business(whatsapp_id: str, business_id: str, db: Session = Depe
     return {"status": "success", "message": f"Switched to {business.business_name}"}
 
 @router.post("/user/businesses/add")
-async def add_business(whatsapp_id: str, business_name: str, business_gstin: str, db: Session = Depends(get_db)):
+async def add_business(business_name: str, business_gstin: str, whatsapp_id: str = Depends(get_current_user), db: Session = Depends(get_db)):
     """Adds a new business for a user (Sub-merchant onboarding)"""
     user = db.query(User).filter(User.whatsapp_id == whatsapp_id).first()
     if not user or not user.google_refresh_token:
@@ -208,8 +208,8 @@ async def add_business(whatsapp_id: str, business_name: str, business_gstin: str
 
 @router.post("/transactions/process-image")
 async def process_image_fe(
-    whatsapp_id: str = Query(...), 
     file: UploadFile = File(...), 
+    whatsapp_id: str = Depends(get_current_user), 
     db: Session = Depends(get_db)
 ):
     """Processes an uploaded bill image or PDF for the frontend"""
@@ -274,8 +274,8 @@ async def process_image_fe(
 
 @router.post("/transactions/process-text")
 async def process_text_fe(
-    whatsapp_id: str = Query(...), 
     text: str = Query(...), 
+    whatsapp_id: str = Depends(get_current_user), 
     db: Session = Depends(get_db)
 ):
     """Processes a text entry for the frontend"""
@@ -291,8 +291,8 @@ async def process_text_fe(
 
 @router.post("/transactions/process-voice")
 async def process_voice_fe(
-    whatsapp_id: str = Query(...), 
     file: UploadFile = File(...), 
+    whatsapp_id: str = Depends(get_current_user), 
     db: Session = Depends(get_db)
 ):
     """Transcribes audio and processes it for the frontend"""
@@ -330,8 +330,8 @@ async def process_voice_fe(
 
 @router.post("/transactions/save")
 async def save_transaction_fe(
-    whatsapp_id: str = Query(...), 
     data: TransactionSave = Body(...), 
+    whatsapp_id: str = Depends(get_current_user), 
     db: Session = Depends(get_db)
 ):
     """Finalizes and saves a transaction to Google Sheets/Drive from FE"""

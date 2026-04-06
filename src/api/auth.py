@@ -10,7 +10,7 @@ from google_auth_oauthlib.flow import Flow
 
 from src.db_service import get_db, User, Business, SessionLocal, save_user_token
 from src.google_service import GoogleService
-from src.utils import sign_state, verify_state
+from src.utils import sign_state, verify_state, create_access_token
 
 logger = logging.getLogger(__name__)
 
@@ -117,8 +117,11 @@ async def google_callback(code: str, state: str = None):
 
         logger.info(f"Successfully linked Google account for {whatsapp_id}")
         
-        # Redirect to React Success Page with the ID so frontend can save it
-        redirect_url = f"/onboarding-success?whatsapp_id={whatsapp_id}"
+        # Issue a session JWT
+        token = create_access_token(whatsapp_id)
+        
+        # Redirect to React Success Page with the token
+        redirect_url = f"/onboarding-success?whatsapp_id={whatsapp_id}&token={token}"
         if link_token:
             redirect_url += f"&link_token={link_token}"
             

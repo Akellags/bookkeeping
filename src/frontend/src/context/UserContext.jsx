@@ -11,11 +11,13 @@ export const UserProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [statsLoading, setStatsLoading] = useState(false);
   const [whatsappId, setWhatsappId] = useState(localStorage.getItem('whatsapp_id'));
+  const [authToken, setAuthToken] = useState(localStorage.getItem('auth_token'));
 
   const fetchUserStats = async (id = whatsappId) => {
     if (!isValidId(id)) return;
     setStatsLoading(true);
     try {
+      // Use the stored token if available
       const response = await axios.get(`/api/user/stats?whatsapp_id=${id}`);
       setUserStats(response.data);
     } catch (error) {
@@ -35,14 +37,20 @@ export const UserProvider = ({ children }) => {
     }
   };
 
-  const login = (id) => {
+  const login = (id, token = null) => {
     localStorage.setItem('whatsapp_id', id);
     setWhatsappId(id);
+    if (token) {
+      localStorage.setItem('auth_token', token);
+      setAuthToken(token);
+    }
   };
 
   const logout = () => {
     localStorage.removeItem('whatsapp_id');
+    localStorage.removeItem('auth_token');
     setWhatsappId(null);
+    setAuthToken(null);
     setUserStats(null);
     setBusinesses([]);
   };
@@ -53,7 +61,7 @@ export const UserProvider = ({ children }) => {
       fetchBusinesses();
     }
     setLoading(false);
-  }, [whatsappId]);
+  }, [whatsappId, authToken]);
 
   return (
     <UserContext.Provider value={{ 
@@ -62,6 +70,7 @@ export const UserProvider = ({ children }) => {
       loading, 
       statsLoading,
       whatsappId, 
+      authToken,
       fetchUserStats, 
       fetchBusinesses, 
       login, 

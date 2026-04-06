@@ -46,13 +46,26 @@ const MainLayout = () => {
 
 function AppContent() {
   useEffect(() => {
+    // Request Interceptor to add JWT Token
+    const requestInterceptor = axios.interceptors.request.use(
+      (config) => {
+        const token = localStorage.getItem('auth_token');
+        if (token) {
+          config.headers.Authorization = `Bearer ${token}`;
+        }
+        return config;
+      },
+      (error) => Promise.reject(error)
+    );
+
     // Global Axios Interceptor for 401 Unauthorized
-    const interceptor = axios.interceptors.response.use(
+    const responseInterceptor = axios.interceptors.response.use(
       (response) => response,
       (error) => {
         if (error.response && error.response.status === 401) {
           console.warn(`401 Unauthorized for ${error.config.url}. Logging out...`);
           localStorage.removeItem('whatsapp_id');
+          localStorage.removeItem('auth_token');
           window.location.href = '/'; // Force reload to landing page
         }
         return Promise.reject(error);
@@ -60,7 +73,8 @@ function AppContent() {
     );
 
     return () => {
-      axios.interceptors.response.eject(interceptor);
+      axios.interceptors.request.eject(requestInterceptor);
+      axios.interceptors.response.eject(responseInterceptor);
     };
   }, []);
 
