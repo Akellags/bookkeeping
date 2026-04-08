@@ -6,6 +6,7 @@ import logging
 import json
 from fastapi import FastAPI, Request, Response, HTTPException
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
@@ -27,6 +28,22 @@ for uvicorn_logger_name in ["uvicorn", "uvicorn.error", "uvicorn.access"]:
         handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s', '%Y-%m-%d %H:%M:%S'))
 
 app = FastAPI(title="Help U - Bookkeeper Backend")
+
+# Configure CORS
+origins = [
+    os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/"),
+    "https://bookkeeper-fe-486079244466.asia-south1.run.app",
+    "http://localhost:5173",
+    "http://localhost:3000",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Exception Handlers
 @app.exception_handler(RequestValidationError)

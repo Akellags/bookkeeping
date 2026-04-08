@@ -269,7 +269,7 @@ async def process_image_fe(
     except Exception as e:
         if os.path.exists(temp_path):
             os.remove(temp_path)
-        logger.error(f"Error processing file: {e}")
+        logger.error(f"Error processing file: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/transactions/process-text")

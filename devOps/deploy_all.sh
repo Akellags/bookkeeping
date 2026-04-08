@@ -16,7 +16,7 @@ echo "📦 Deploying Backend ($BACKEND_SERVICE)..."
 gcloud run deploy $BACKEND_SERVICE \
   --source . \
   --region $REGION \
-  --env-vars-file .env \
+  --env-vars-file .env.production \
   --allow-unauthenticated \
   --service-account="895750056952-compute@developer.gserviceaccount.com" # Update if needed
 

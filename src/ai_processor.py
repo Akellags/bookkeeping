@@ -1,8 +1,10 @@
 import os
 import json
 import logging
+import httpx
 from openai import OpenAI
 from dotenv import load_dotenv
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 load_dotenv()
 
@@ -10,8 +12,17 @@ logger = logging.getLogger(__name__)
 
 class AIProcessor:
     def __init__(self):
-        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        # Fallback to gpt-4o-mini if env is not set, as it is a stable known model
+        # Increase timeout for Vision/Audio tasks which can be slow
+        # Default is usually 60s, we increase it to 120s
+        api_key = os.getenv("OPENAI_API_KEY")
+        if api_key:
+            api_key = api_key.strip()
+            
+        self.client = OpenAI(
+            api_key=api_key,
+            http_client=httpx.Client(timeout=120.0)
+        )
+        # Fallback to gpt-4o-mini if env is not set
         self.model = os.getenv("OPENAI_MODEL_NAME", "gpt-4o-mini")
         self.system_prompt = """
         Role: You are a specialist Indian GST Compliance Accountant. 
@@ -87,54 +98,45 @@ class AIProcessor:
         }
         """
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     def process_purchase_image(self, image_url: str):
         """Processes a bill image using GPT-4o-mini Vision API"""
-        try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": self.system_prompt},
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": "Extract GST data from this bill image."},
-                            {"type": "image_url", "image_url": {"url": image_url}}
-                        ]
-                    }
-                ],
-                response_format={"type": "json_object"}
-            )
-            return json.loads(response.choices[0].message.content)
-        except Exception as e:
-            logger.error(f"Error processing purchase image: {e}")
-            return None
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": self.system_prompt},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Extract GST data from this bill image."},
+                        {"type": "image_url", "image_url": {"url": image_url}}
+                    ]
+                }
+            ],
+            response_format={"type": "json_object"}
+        )
+        return json.loads(response.choices[0].message.content)
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     def transcribe_audio(self, audio_file_path: str):
         """Transcribes audio using Whisper API"""
-        try:
-            with open(audio_file_path, "rb") as audio_file:
-                transcript = self.client.audio.transcriptions.create(
-                    model="whisper-1", 
-                    file=audio_file,
-                    response_format="text"
-                )
-            return transcript
-        except Exception as e:
-            logger.error(f"Error transcribing audio: {e}")
-            return None
+        with open(audio_file_path, "rb") as audio_file:
+            transcript = self.client.audio.transcriptions.create(
+                model="whisper-1", 
+                file=audio_file,
+                response_format="text"
+            )
+        return transcript
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     def process_sales_text(self, text: str):
         """Processes sales voice transcript or text message"""
-        try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": f"Extract GST data from this sales record: {text}"}
-                ],
-                response_format={"type": "json_object"}
-            )
-            return json.loads(response.choices[0].message.content)
-        except Exception as e:
-            logger.error(f"Error processing sales text: {e}")
-            return None
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": f"Extract GST data from this sales record: {text}"}
+            ],
+            response_format={"type": "json_object"}
+        )
+        return json.loads(response.choices[0].message.content)

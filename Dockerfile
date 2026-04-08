@@ -6,18 +6,19 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     poppler-utils \
     libmagic1 \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src/ ./src/
-COPY google_creds.json .
 
 ENV PYTHONPATH=/app/src
-ENV GOOGLE_APPLICATION_CREDENTIALS=/app/google_creds.json
+ENV PORT=8080
 
 # Expose the port FastAPI runs on
 EXPOSE 8080
 
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080"]
+# Use shell form with exec for correct signal handling and env var expansion
+CMD ["sh", "-c", "uvicorn src.main:app --host 0.0.0.0 --port ${PORT}"]

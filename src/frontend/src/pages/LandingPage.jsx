@@ -17,6 +17,17 @@ const isValidId = (id) => id && id !== 'null' && id !== 'undefined' && id.trim()
 const LandingPage = () => {
   const [isRegistered, setIsRegistered] = useState(false);
   const navigate = useNavigate();
+  
+  const getApiBaseUrl = () => {
+    const envUrl = import.meta.env.VITE_API_BASE_URL;
+    if (envUrl) return envUrl;
+    if (window.location.hostname.includes('-fe-')) {
+      return window.location.origin.replace('-fe-', '-be-');
+    }
+    return '';
+  };
+
+  const apiBaseUrl = getApiBaseUrl();
 
   useEffect(() => {
     const whatsappId = localStorage.getItem('whatsapp_id');
@@ -34,7 +45,7 @@ const LandingPage = () => {
       // Force navigation to dashboard
       window.location.href = '/dashboard';
     } else {
-      window.location.href = '/auth/google?whatsapp_id=new_user';
+      window.location.href = `${apiBaseUrl}/auth/google?whatsapp_id=new_user`;
     }
   };
 
@@ -61,8 +72,8 @@ const LandingPage = () => {
             </button>
           ) : (
             <>
-              <a href="/auth/google?whatsapp_id=new_user" className="text-sm font-bold text-gray-700 hover:text-blue-600 transition">Sign In</a>
-              <a href="/auth/google?whatsapp_id=new_user" className="bg-blue-600 text-white px-6 py-3 rounded-xl text-sm font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 transition transform hover:scale-105 active:scale-95">
+              <a href={`${apiBaseUrl}/auth/google?whatsapp_id=new_user`} className="text-sm font-bold text-gray-700 hover:text-blue-600 transition">Sign In</a>
+              <a href={`${apiBaseUrl}/auth/google?whatsapp_id=new_user`} className="bg-blue-600 text-white px-6 py-3 rounded-xl text-sm font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 transition transform hover:scale-105 active:scale-95">
                 Sign Up
               </a>
             </>
@@ -93,7 +104,7 @@ const LandingPage = () => {
                 <ArrowRight size={20} />
               </button>
             ) : (
-              <a href="/auth/google?whatsapp_id=new_user" className="flex items-center justify-center space-x-2 bg-blue-600 text-white px-8 py-5 rounded-2xl text-lg font-bold shadow-xl shadow-blue-200 hover:bg-blue-700 transition transform hover:scale-105">
+              <a href={`${apiBaseUrl}/auth/google?whatsapp_id=new_user`} className="flex items-center justify-center space-x-2 bg-blue-600 text-white px-8 py-5 rounded-2xl text-lg font-bold shadow-xl shadow-blue-200 hover:bg-blue-700 transition transform hover:scale-105">
                 <span>Try Help U Now</span>
                 <ArrowRight size={20} />
               </a>

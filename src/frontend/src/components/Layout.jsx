@@ -142,7 +142,7 @@ const Layout = ({ children }) => {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 p-8">
+      <main className="flex-1 p-8 min-w-0">
         <header className="flex justify-between items-center mb-10">
           <div className="flex items-center space-x-4">
             {isRecordPage && (

@@ -20,3 +20,4 @@ python-multipart
 pyjwt 
 tenacity
 python-dateutil
+python-dotenv

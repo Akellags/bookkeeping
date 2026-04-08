@@ -2,6 +2,22 @@ import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, Outlet } from 'react-router-dom';
 import axios from 'axios';
 import { Loader2 } from 'lucide-react';
+
+// Configure Axios Defaults
+const getApiBaseUrl = () => {
+  const envUrl = import.meta.env.VITE_API_BASE_URL;
+  if (envUrl) return envUrl;
+  
+  // Intelligent fallback for Cloud Run deployments
+  if (window.location.hostname.includes('-fe-')) {
+    return window.location.origin.replace('-fe-', '-be-');
+  }
+  
+  return '';
+};
+
+axios.defaults.baseURL = getApiBaseUrl();
+
 import { UserProvider, useUser } from './context/UserContext';
 import Layout from './components/Layout';
 import LandingPage from './pages/LandingPage';

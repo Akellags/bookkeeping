@@ -15,6 +15,8 @@ const GSTReports = () => {
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState(null);
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
+  
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '';
 
   const formatDate = (dateStr) => {
     if (!dateStr) return '';
@@ -26,7 +28,11 @@ const GSTReports = () => {
     try {
       setDownloading(true);
       if (!whatsappId) return;
-      let url = `/api/user/reports/download?whatsapp_id=${whatsappId}`;
+      
+      // Use absolute URL for the request if apiBaseUrl exists
+      const endpoint = `/api/user/reports/download?whatsapp_id=${whatsappId}`;
+      let url = apiBaseUrl ? `${apiBaseUrl}${endpoint}` : endpoint;
+      
       if (dateRange.start) url += `&start_date=${formatDate(dateRange.start)}`;
       if (dateRange.end) url += `&end_date=${formatDate(dateRange.end)}`;
       const response = await axios.get(url);
@@ -49,7 +55,11 @@ const GSTReports = () => {
 
   const downloadInvoice = (invoiceNo) => {
     if (!whatsappId) return;
-    window.open(`/api/user/invoice/pdf?whatsapp_id=${whatsappId}&invoice_no=${invoiceNo}`, '_blank');
+    // Ensure absolute URL for window.open to avoid SPA routing capture
+    const baseUrl = apiBaseUrl || window.location.origin.replace('-fe-', '-be-'); 
+    const url = `${baseUrl}/api/user/invoice/pdf?whatsapp_id=${whatsappId}&invoice_no=${invoiceNo}`;
+    console.log('Opening PDF:', url);
+    window.open(url, '_blank');
   };
 
   useEffect(() => {
@@ -99,7 +109,7 @@ const GSTReports = () => {
   const rows = reportData.slice(1);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 max-w-full overflow-hidden">
       {/* Filters & Actions */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
         <div className="flex flex-col sm:flex-row items-center gap-4">
@@ -140,17 +150,17 @@ const GSTReports = () => {
         </div>
       )}
 
-      {/* Table */}
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-gray-50 border-b border-gray-100">
-                <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider whitespace-nowrap">
+      {/* Table Container */}
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden w-full">
+        <div className="overflow-auto max-h-[calc(100vh-220px)]">
+          <table className="w-full text-left border-collapse min-w-full">
+            <thead className="sticky top-0 z-10 bg-gray-50 shadow-sm">
+              <tr className="border-b border-gray-100">
+                <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider whitespace-nowrap bg-gray-50">
                   Action
                 </th>
                 {headers.map((header, i) => (
-                  <th key={i} className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider whitespace-nowrap">
+                  <th key={i} className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider whitespace-nowrap bg-gray-50">
                     {header}
                   </th>
                 ))}
