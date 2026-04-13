@@ -1,6 +1,7 @@
 import os
 import logging
 from sqlalchemy import create_engine, Column, String, Text, DateTime, JSON, ForeignKey, Boolean
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
@@ -94,6 +95,15 @@ class Transaction(Base):
     media_url = Column(Text)
     extracted_json = Column(JSON)
     status = Column(String)
+    
+    # Extraction Metadata
+    extraction_provider = Column(String, default="openai")
+    provider_model = Column(String)
+    confidence_score = Column(JSONB) # Can store float or detailed dict
+    field_confidence = Column(JSONB)
+    needs_review = Column(Boolean, default=False)
+    review_reason = Column(String)
+    
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class ProcessedMessage(Base):

@@ -14,7 +14,8 @@ from pydantic import BaseModel
 import stripe
 
 from src.db_service import get_db, User, Business, Transaction, SessionLocal
-from src.ai_processor import AIProcessor
+from src.extraction.orchestrator import ExtractionOrchestrator
+from src.extraction.schemas import ExtractionRequest
 from src.google_service import GoogleService
 from src.utils import (
     get_state_code, get_uqc_code, upload_whatsapp_media, 
@@ -25,8 +26,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api")
 
-# Lazy load AI Processor
-ai_processor = AIProcessor()
+# Lazy load Extraction Orchestrator
+extraction_orchestrator = ExtractionOrchestrator()
 
 class SettingsUpdate(BaseModel):
     business_name: str
@@ -280,31 +281,54 @@ async def process_image_fe(
         shutil.copyfileobj(file.file, buffer)
     
     try:
-        extraction = None
+        extraction_result = None
         # Process with AI
-        if ext in [".jpg", ".jpeg", ".png"]:
-            with open(temp_path, "rb") as image_file:
-                encoded_image = base64.b64encode(image_file.read()).decode('utf-8')
-                image_data_uri = f"data:image/jpeg;base64,{encoded_image}"
-                extraction = ai_processor.process_purchase_image(image_data_uri)
-        elif ext == ".pdf":
-            # Convert PDF to Image for Vision analysis
-            image_path = convert_pdf_to_image(temp_path)
-            if image_path:
-                with open(image_path, "rb") as image_file:
-                    encoded_image = base64.b64encode(image_file.read()).decode('utf-8')
-                    image_data_uri = f"data:image/jpeg;base64,{encoded_image}"
-                    extraction = ai_processor.process_purchase_image(image_data_uri)
-                # Cleanup temp image
-                if os.path.exists(image_path): os.remove(image_path)
-            else:
-                # Fallback to text extraction
-                pdf_text = extract_text_from_pdf(temp_path)
-                if pdf_text:
-                    extraction = ai_processor.process_sales_text(f"Extract GST data from this bill PDF content: {pdf_text}")
-        
-        if not extraction:
+        if ext in [".jpg", ".jpeg", ".png"] or ext == ".pdf":
+            # For PDFs, convert_pdf_to_image returns an image path if it works
+            target_path = temp_path
+            mime_type = "image/jpeg" if ext in [".jpg", ".jpeg"] else f"application/{ext[1:]}"
+            
+            if ext == ".pdf":
+                image_path = convert_pdf_to_image(temp_path)
+                if image_path:
+                    target_path = image_path
+                    mime_type = "image/jpeg"
+                else:
+                    # Fallback to text extraction if PDF to image fails
+                    pdf_text = extract_text_from_pdf(temp_path)
+                    if pdf_text:
+                        # Create a temp text file for the orchestrator
+                        txt_path = temp_path + ".txt"
+                        with open(txt_path, "w", encoding="utf-8") as f:
+                            f.write(pdf_text)
+                        target_path = txt_path
+                        mime_type = "text/plain"
+
+            # Determine provider from user settings (placeholder for now, defaults to openai)
+            provider = "openai"
+            if os.getenv("DEFAULT_EXTRACTION_PROVIDER") == "google":
+                provider = "google"
+            
+            req = ExtractionRequest(
+                user_id=whatsapp_id,
+                business_id=user.active_business_id,
+                media_path=target_path,
+                mime_type=mime_type,
+                extraction_provider=provider
+            )
+            extraction_result = await extraction_orchestrator.extract(req)
+            
+            # Cleanup temp text file if created
+            if target_path.endswith(".txt") and os.path.exists(target_path):
+                os.remove(target_path)
+            # Cleanup temp image if converted from PDF
+            if ext == ".pdf" and target_path.endswith(".jpg") and os.path.exists(target_path):
+                os.remove(target_path)
+
+        if not extraction_result:
             raise HTTPException(status_code=500, detail="AI extraction failed")
+        
+        extraction = extraction_result.canonical_data.model_dump()
         
         # Save pending transaction to DB for reference
         pending_tx = Transaction(
@@ -314,7 +338,14 @@ async def process_image_fe(
             transaction_type="PENDING",
             media_url=temp_path,
             extracted_json=extraction,
-            status="FE_PENDING_CONFIRM"
+            status="FE_PENDING_CONFIRM",
+            # Metadata
+            extraction_provider=extraction_result.extraction_provider,
+            provider_model=extraction_result.provider_model,
+            confidence_score=extraction_result.confidence_score,
+            field_confidence=extraction_result.field_confidence,
+            needs_review=extraction_result.needs_review,
+            review_reason=extraction_result.review_reason
         )
         db.add(pending_tx)
         db.commit()
@@ -337,11 +368,35 @@ async def process_text_fe(
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
     
-    extraction = ai_processor.process_sales_text(text)
-    if not extraction:
-        raise HTTPException(status_code=500, detail="AI extraction failed")
+    # Save temporary text file
+    temp_id = str(uuid.uuid4())
+    temp_path = os.path.join("temp_media", f"text_{temp_id}.txt")
+    with open(temp_path, "w", encoding="utf-8") as f:
+        f.write(text)
     
-    return {"extraction": extraction}
+    try:
+        # Determine provider
+        provider = "openai"
+        if os.getenv("DEFAULT_EXTRACTION_PROVIDER") == "google":
+             provider = "google"
+
+        req = ExtractionRequest(
+            user_id=whatsapp_id,
+            business_id=user.active_business_id,
+            media_path=temp_path,
+            mime_type="text/plain",
+            extraction_provider=provider
+        )
+        extraction_result = await extraction_orchestrator.extract(req)
+        
+        if not extraction_result:
+            raise HTTPException(status_code=500, detail="AI extraction failed")
+        
+        extraction = extraction_result.canonical_data.model_dump()
+        return {"extraction": extraction}
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
 
 @router.post("/transactions/process-voice")
 async def process_voice_fe(
@@ -364,16 +419,37 @@ async def process_voice_fe(
         shutil.copyfileobj(file.file, buffer)
     
     try:
-        # 1. Transcribe with Whisper
-        transcript = ai_processor.transcribe_audio(temp_path)
+        # 1. Transcribe
+        transcript = extraction_orchestrator.transcribe(temp_path)
         if not transcript:
             raise HTTPException(status_code=500, detail="Transcription failed")
             
-        # 2. Process transcript text
-        extraction = ai_processor.process_sales_text(transcript)
-        if not extraction:
+        # 2. Save transcript to temp file for extraction
+        txt_path = temp_path + ".txt"
+        with open(txt_path, "w", encoding="utf-8") as f:
+            f.write(transcript)
+
+        # 3. Process transcript text
+        provider = "openai"
+        if os.getenv("DEFAULT_EXTRACTION_PROVIDER") == "google":
+             provider = "google"
+
+        req = ExtractionRequest(
+            user_id=whatsapp_id,
+            business_id=user.active_business_id,
+            media_path=txt_path,
+            mime_type="text/plain",
+            extraction_provider=provider
+        )
+        extraction_result = await extraction_orchestrator.extract(req)
+        
+        if os.path.exists(txt_path):
+            os.remove(txt_path)
+
+        if not extraction_result:
             raise HTTPException(status_code=500, detail="AI extraction failed")
-            
+        
+        extraction = extraction_result.canonical_data.model_dump()
         return {"transcript": transcript, "extraction": extraction}
     except Exception as e:
         logger.error(f"Error processing voice: {e}")

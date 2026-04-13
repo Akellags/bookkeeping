@@ -21,3 +21,6 @@ pyjwt
 tenacity
 python-dateutil
 python-dotenv
+google-cloud-documentai
+google-cloud-aiplatform
+pytest-asyncio

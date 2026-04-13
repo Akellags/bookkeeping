@@ -6,18 +6,20 @@ import time
 from datetime import datetime
 from sqlalchemy.orm import Session
 from src.db_service import User, Business, Transaction
+from src.extraction.orchestrator import ExtractionOrchestrator
+from src.extraction.schemas import ExtractionRequest
+from src.google_service import GoogleService
 from src.utils import (
     send_whatsapp_text, send_whatsapp_interactive, upload_whatsapp_media, 
     send_whatsapp_document, convert_image_to_pdf, is_valid_gstin, 
     get_state_code, get_uqc_code, handle_google_error, extract_text_from_pdf,
     convert_pdf_to_image
 )
-from src.ai_processor import AIProcessor
-from src.google_service import GoogleService
 
 logger = logging.getLogger(__name__)
 
-ai_processor = AIProcessor()
+# Lazy load Extraction Orchestrator
+extraction_orchestrator = ExtractionOrchestrator()
 
 async def handle_interactive(db: Session, user: User, business: Business, message_data: dict):
     """Handles interactive responses (buttons and lists)"""
@@ -302,36 +304,56 @@ async def _handle_confirmation(db: Session, user: User, business: Business, tx: 
     if tx.media_url and os.path.exists(tx.media_url) and (not extraction or "total_amount" not in extraction):
         logger.info(f"Interactive: Starting AI extraction for tx {tx.id} using {tx.media_url}")
         try:
-            if tx.media_url.lower().endswith((".jpg", ".jpeg", ".png")):
-                # Handle Image
-                with open(tx.media_url, "rb") as image_file:
-                    encoded_image = base64.b64encode(image_file.read()).decode('utf-8')
-                    image_data_uri = f"data:image/jpeg;base64,{encoded_image}"
-                    extraction = ai_processor.process_purchase_image(image_data_uri)
-            elif tx.media_url.lower().endswith(".pdf"):
-                # Handle PDF via Vision by converting to Image
-                logger.info(f"Converting PDF to image for Vision: {tx.media_url}")
+            target_path = tx.media_url
+            mime_type = "image/jpeg"
+            if tx.media_url.lower().endswith(".pdf"):
+                mime_type = "application/pdf"
+                # For Vision analysis we still might want to convert to image first if using OpenAI
+                # But our GoogleExtractor can handle PDF directly. 
+                # Let's see if we can convert if needed by checking provider
+                
+            provider = "openai"
+            if os.getenv("DEFAULT_EXTRACTION_PROVIDER") == "google":
+                provider = "google"
+            
+            # OpenAI vision still needs image. Google can take PDF.
+            # If provider is openai and it's a PDF, we convert.
+            temp_image_to_delete = None
+            if provider == "openai" and tx.media_url.lower().endswith(".pdf"):
+                logger.info(f"Converting PDF to image for OpenAI Vision: {tx.media_url}")
                 image_path = convert_pdf_to_image(tx.media_url)
                 if image_path:
-                    with open(image_path, "rb") as image_file:
-                        encoded_image = base64.b64encode(image_file.read()).decode('utf-8')
-                        image_data_uri = f"data:image/jpeg;base64,{encoded_image}"
-                        extraction = ai_processor.process_purchase_image(image_data_uri)
-                    # Cleanup temp image but keep PDF
-                    if os.path.exists(image_path): os.remove(image_path)
-                else:
-                    logger.warning(f"Could not convert PDF to image for Vision: {tx.media_url}")
-                    # Fallback to text extraction if vision conversion fails
-                    pdf_text = extract_text_from_pdf(tx.media_url)
-                    if pdf_text:
-                        extraction = ai_processor.process_sales_text(f"Extract GST data from this bill PDF content: {pdf_text}")
+                    target_path = image_path
+                    mime_type = "image/jpeg"
+                    temp_image_to_delete = image_path
+
+            req = ExtractionRequest(
+                user_id=user.whatsapp_id,
+                business_id=business.id,
+                media_path=target_path,
+                mime_type=mime_type,
+                extraction_provider=provider
+            )
+            extraction_result = await extraction_orchestrator.extract(req)
             
-            if extraction:
+            if extraction_result:
                 logger.info(f"Interactive: AI Extraction successful for tx {tx.id}")
+                extraction = extraction_result.canonical_data.model_dump()
                 tx.extracted_json = extraction
+                
+                # Update Metadata
+                tx.extraction_provider = extraction_result.extraction_provider
+                tx.provider_model = extraction_result.provider_model
+                tx.confidence_score = extraction_result.confidence_score
+                tx.field_confidence = extraction_result.field_confidence
+                tx.needs_review = extraction_result.needs_review
+                tx.review_reason = extraction_result.review_reason
+                
                 db.commit()
-            else:
-                logger.warning(f"Interactive: AI Extraction returned None for tx {tx.id}")
+            
+            if temp_image_to_delete and os.path.exists(temp_image_to_delete):
+                os.remove(temp_image_to_delete)
+
         except Exception as e:
             logger.error(f"Interactive: Error during AI extraction: {e}")
 
