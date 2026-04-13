@@ -163,25 +163,26 @@ class GoogleService:
         return target_name
 
     @google_retry
-    async def initialize_user_drive(self):
-        """Idempotently sets up 'Help U' folder, 'Master_Ledger', and 'Invoice_Template' in user's Drive"""
-        # 1. Check for existing Help U Folder
+    async def initialize_user_drive(self, business_name: str):
+        """Idempotently sets up folder, 'Master_Ledger', and 'Invoice_Template' in user's Drive"""
+        # 1. Check for existing Folder
+        folder_name = f"Help U - {business_name}"
         loop = asyncio.get_event_loop()
-        q = "name = 'Help U' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+        q = f"name = '{folder_name}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
         results = await loop.run_in_executor(None, lambda: self.drive_service.files().list(q=q, fields="files(id)").execute())
         files = results.get("files", [])
         
         if files:
             folder_id = files[0]["id"]
-            logger.info(f"Found existing 'Help U' folder: {folder_id}")
+            logger.info(f"Found existing folder: {folder_id} ({folder_name})")
         else:
             folder_metadata = {
-                "name": "Help U",
+                "name": folder_name,
                 "mimeType": "application/vnd.google-apps.folder"
             }
             folder = await loop.run_in_executor(None, lambda: self.drive_service.files().create(body=folder_metadata, fields="id").execute())
             folder_id = folder.get("id")
-            logger.info(f"Created new 'Help U' folder: {folder_id}")
+            logger.info(f"Created new folder: {folder_id} ({folder_name})")
 
         # 2. Check for existing Master Ledger Sheet
         q = f"name = 'Master_Ledger' and parents in '{folder_id}' and trashed = false"
@@ -485,9 +486,9 @@ class GoogleService:
 
         # Header
         p.setFont("Helvetica-Bold", 16)
-        p.drawString(2*cm, height-2*cm, user_profile.get("business_name", "Help U Traders"))
+        p.drawString(2*cm, height-2*cm, user_profile.get("business_name", "My Business"))
         p.setFont("Helvetica", 10)
-        p.drawString(2*cm, height-2.6*cm, f"GSTIN: {user_profile.get('business_gstin', '37ABCDE1234F1Z5')}")
+        p.drawString(2*cm, height-2.6*cm, f"GSTIN: {user_profile.get('business_gstin', '')}")
         p.setFont("Helvetica-Bold", 14)
         p.drawCentredString(width/2, height-4*cm, "TAX INVOICE")
         

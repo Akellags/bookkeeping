@@ -24,9 +24,6 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
 
 SCOPES = ["https://www.googleapis.com/auth/drive.file", "openid", "https://www.googleapis.com/auth/userinfo.email", "https://www.googleapis.com/auth/documents"]
 
-DEFAULT_BUSINESS_NAME = os.getenv("DEFAULT_BUSINESS_NAME", "Help U Traders")
-DEFAULT_BUSINESS_GSTIN = os.getenv("DEFAULT_BUSINESS_GSTIN", "37ABCDE1234F1Z5")
-
 @router.get("/auth/google")
 async def google_login(whatsapp_id: str = Query(...)):
     """Initializes Google OAuth2 flow with manual URL construction to bypass PKCE issues"""
@@ -44,9 +41,13 @@ async def google_login(whatsapp_id: str = Query(...)):
         "scope": " ".join(SCOPES),
         "state": signed_state,
         "access_type": "offline",
-        "prompt": "consent",
         "include_granted_scopes": "true"
     }
+
+    # Force prompt=consent for brand new users to ensure we get a refresh_token
+    # Returning users can use the silent flow
+    if whatsapp_id == "new_user":
+        params["prompt"] = "consent"
     
     auth_url = f"https://accounts.google.com/o/oauth2/auth?{urllib.parse.urlencode(params)}"
     logger.info(f"Redirecting user to Google Auth for: {whatsapp_id}")
@@ -104,48 +105,41 @@ async def google_callback(code: str, state: str = None):
         user = save_user_token(whatsapp_id, email, refresh_token)
         whatsapp_id = user.whatsapp_id
         
-        # Use context manager for DB session to prevent leaks
-        link_token = None
+        # Determine if user needs onboarding
+        is_new_user = not user.drive_initialized
+        
+        # Check if existing user has default values that need updating
         with SessionLocal() as db:
             db_user = db.query(User).filter(User.whatsapp_id == whatsapp_id).first()
-            existing_business = db.query(Business).filter(Business.user_whatsapp_id == whatsapp_id).first()
-            
+            if db_user and not is_new_user:
+                business = db.query(Business).filter(Business.user_whatsapp_id == whatsapp_id).first()
+                if business:
+                    # If they have default "Help U Traders" or the old placeholder GSTIN, force onboarding
+                    if business.business_name == "Help U Traders" or business.business_gstin == "37ABCDE1234F1Z5":
+                        is_new_user = True
+                        logger.info(f"Existing user {whatsapp_id} has default values. Redirecting to onboarding.")
+
             # Generate link token if it's a web user
+            link_token = None
             if whatsapp_id.startswith("web_") and db_user:
                 link_token = secrets.token_hex(3).upper()
                 db_user.link_token = link_token
                 db_user.link_token_expires_at = datetime.utcnow() + timedelta(minutes=30)
                 db.commit()
 
-            if not existing_business:
-                # Initialize Google Drive Folder/Sheet/Template
-                gs = GoogleService(refresh_token)
-                folder_id, sheet_id, template_id = await gs.initialize_user_drive()
-                
-                # Update user with first business
-                business_id = str(uuid.uuid4())
-                new_business = Business(
-                    id=business_id,
-                    user_whatsapp_id=whatsapp_id,
-                    business_name=DEFAULT_BUSINESS_NAME,
-                    business_gstin=DEFAULT_BUSINESS_GSTIN,
-                    drive_folder_id=folder_id,
-                    master_ledger_sheet_id=sheet_id,
-                    invoice_template_id=template_id
-                )
-                db.add(new_business)
-                if db_user:
-                    db_user.active_business_id = business_id
-                    db_user.drive_initialized = True
-                db.commit()
-
-        logger.info(f"Successfully linked Google account for {whatsapp_id}")
+        logger.info(f"Successfully linked Google account for {whatsapp_id}. Need Onboarding: {is_new_user}")
         
         # Issue a session JWT
         token = create_access_token(whatsapp_id)
         
-        # Redirect to React Success Page with the token
-        redirect_url = f"{FRONTEND_URL}/onboarding-success?whatsapp_id={whatsapp_id}&token={token}"
+        # Redirect to appropriate page
+        if is_new_user:
+            # Redirect to Business Setup (pass new=false if they already initialized drive but have default names)
+            redirect_url = f"{FRONTEND_URL}/onboarding-business?whatsapp_id={whatsapp_id}&token={token}&new={'true' if not user.drive_initialized else 'false'}"
+        else:
+            # Redirect to Login Success (Directly to dashboard)
+            redirect_url = f"{FRONTEND_URL}/login-success?whatsapp_id={whatsapp_id}&token={token}"
+        
         if link_token:
             redirect_url += f"&link_token={link_token}"
             

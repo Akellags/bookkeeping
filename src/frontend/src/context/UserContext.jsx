@@ -56,11 +56,14 @@ export const UserProvider = ({ children }) => {
   };
 
   useEffect(() => {
-    if (isValidId(whatsappId)) {
-      fetchUserStats();
-      fetchBusinesses();
-    }
-    setLoading(false);
+    const initialize = async () => {
+      if (isValidId(whatsappId) && authToken) {
+        await fetchUserStats();
+        await fetchBusinesses();
+      }
+      setLoading(false);
+    };
+    initialize();
   }, [whatsappId, authToken]);
 
   return (

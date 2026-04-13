@@ -11,7 +11,9 @@ import {
   Wallet,
   ArrowUpRight,
   Plus,
-  Maximize2
+  Maximize2,
+  Building2,
+  ShieldAlert
 } from 'lucide-react';
 import { useUser } from '../context/UserContext';
 import TransactionDrawer from '../components/TransactionDrawer';
@@ -60,8 +62,35 @@ const Dashboard = () => {
   const userStats = stats || globalUserStats || { bills: 0, sales: 0, purchases: 0, payments: 0, expenses: 0, expenses_paid: 0, expenses_unpaid: 0 };
   const isCurrentlyLoading = loading || globalStatsLoading;
 
+  const isProfileIncomplete = userStats.business_name === 'Help U Traders' || 
+                             userStats.business_gstin === '37ABCDE1234F1Z5' ||
+                             !userStats.business_name;
+
   return (
     <>
+        {isProfileIncomplete && (
+          <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-2xl p-6 mb-8 shadow-lg shadow-blue-100 flex flex-col md:flex-row items-center justify-between gap-4 border border-blue-400 relative overflow-hidden group">
+            <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:scale-110 transition duration-500">
+              <Building2 size={80} className="text-white" />
+            </div>
+            <div className="flex items-center space-x-4 relative z-10">
+              <div className="bg-white/20 p-3 rounded-xl backdrop-blur-md">
+                <ShieldAlert className="text-white" size={24} />
+              </div>
+              <div>
+                <h4 className="text-white font-bold text-lg">Complete Your Business Profile</h4>
+                <p className="text-blue-100 text-sm font-medium">You are currently using default business details. Update them for accurate GSTR-1 reports.</p>
+              </div>
+            </div>
+            <button 
+              onClick={() => navigate('/settings')}
+              className="relative z-10 bg-white text-blue-600 font-bold py-3 px-8 rounded-xl hover:bg-blue-50 transition shadow-xl shadow-blue-900/20 whitespace-nowrap"
+            >
+              Update Settings
+            </button>
+          </div>
+        )}
+
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-10 gap-6">
           <div className="flex flex-col sm:flex-row items-center gap-4 bg-white p-2 rounded-xl border border-gray-100 shadow-sm">
             {/* Date Filters */}

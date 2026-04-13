@@ -2,6 +2,9 @@
 
 To restore your deployment environment after a restart, copy and paste these commands into your **PowerShell** window:
 
+This is only for backend only. We will not use FE as we are hosting the FE on firebase
+for FE take a look at docs\firebase_fe_depolyment_guide.md
+
 ```powershell
 # Project Configuration
 $env:PROJECT_ID="help-u-488511"
@@ -11,7 +14,7 @@ $env:REPO_ROOT="c:\Users\ALIENWARE\Projects\helpU\bookkeeper"
 # Service and Database Configuration
 $env:INSTANCE_CONNECTION_NAME="help-u-488511:asia-south1:helpu"
 $env:BACKEND_URL="https://bookkeeper-be-486079244466.asia-south1.run.app"
-$env:FRONTEND_URL="https://bookkeeper-fe-486079244466.asia-south1.run.app"
+$env:FRONTEND_URL="https://books.helpsu.ai"
 
 # Verify they are set
 echo "Project: $env:PROJECT_ID"

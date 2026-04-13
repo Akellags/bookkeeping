@@ -31,12 +31,15 @@ const LandingPage = () => {
 
   useEffect(() => {
     const whatsappId = localStorage.getItem('whatsapp_id');
-    if (isValidId(whatsappId)) {
+    const token = localStorage.getItem('auth_token');
+    if (isValidId(whatsappId) && token) {
       setIsRegistered(true);
+      // Auto-redirect to dashboard if token exists
+      navigate('/dashboard', { replace: true });
     } else {
       setIsRegistered(false);
     }
-  }, []);
+  }, [navigate]);
 
   const handleDashboardClick = (e) => {
     e.preventDefault();

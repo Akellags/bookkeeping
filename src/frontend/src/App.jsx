@@ -26,6 +26,8 @@ import RecordTransaction from './pages/RecordTransaction';
 import GSTReports from './pages/GSTReports';
 import Settings from './pages/Settings';
 import OnboardingSuccess from './pages/OnboardingSuccess';
+import BusinessOnboarding from './pages/BusinessOnboarding';
+import LoginSuccess from './pages/LoginSuccess';
 import AuthError from './pages/AuthError';
 
 // Protected Route Component
@@ -110,6 +112,8 @@ function AppContent() {
         </Route>
 
         <Route path="/onboarding-success" element={<OnboardingSuccess />} />
+        <Route path="/onboarding-business" element={<BusinessOnboarding />} />
+        <Route path="/login-success" element={<LoginSuccess />} />
         <Route path="/auth-error" element={<AuthError />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

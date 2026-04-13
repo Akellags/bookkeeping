@@ -32,6 +32,10 @@ class SettingsUpdate(BaseModel):
     business_name: str
     business_gstin: str
 
+class OnboardingSetup(BaseModel):
+    business_name: str
+    business_gstin: Optional[str] = ""
+
 class TransactionSave(BaseModel):
     extraction: Dict
     media_url: Optional[str] = None
@@ -70,9 +74,59 @@ async def get_user_stats(whatsapp_id: str = Depends(get_current_user), start_dat
         "drive_folder_id": business.drive_folder_id,
         "sheet_id": business.master_ledger_sheet_id,
         "business_id": business.id,
-        "business_name": business.business_name or "Help U Traders",
-        "business_gstin": business.business_gstin or "37ABCDE1234F1Z5"
+        "business_name": business.business_name,
+        "business_gstin": business.business_gstin
     }
+
+@router.post("/user/onboard")
+async def onboard_user(setup: OnboardingSetup, whatsapp_id: str = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Initializes business profile and Google Drive during onboarding"""
+    user = db.query(User).filter(User.whatsapp_id == whatsapp_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    
+    if not user.google_refresh_token:
+        raise HTTPException(status_code=401, detail="User not linked to Google")
+
+    # Check if business already exists
+    business = db.query(Business).filter(Business.user_whatsapp_id == whatsapp_id).first()
+    
+    # Initialize Google Drive with the provided business name
+    gs = GoogleService(user.google_refresh_token)
+    try:
+        # Pass the business name to initialize_user_drive if it supports it
+        # Otherwise, it will use the default from env/code
+        folder_id, sheet_id, template_id = await gs.initialize_user_drive(business_name=setup.business_name)
+        
+        if business:
+            # Update existing placeholder business
+            business.business_name = setup.business_name
+            business.business_gstin = setup.business_gstin
+            business.drive_folder_id = folder_id
+            business.master_ledger_sheet_id = sheet_id
+            business.invoice_template_id = template_id
+        else:
+            # Create new business if none exists
+            business_id = str(uuid.uuid4())
+            business = Business(
+                id=business_id,
+                user_whatsapp_id=whatsapp_id,
+                business_name=setup.business_name,
+                business_gstin=setup.business_gstin,
+                drive_folder_id=folder_id,
+                master_ledger_sheet_id=sheet_id,
+                invoice_template_id=template_id
+            )
+            db.add(business)
+            user.active_business_id = business_id
+        
+        user.drive_initialized = True
+        db.commit()
+        return {"status": "success", "message": "Onboarding completed successfully"}
+    except Exception as e:
+        logger.error(f"Onboarding error: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to initialize Google Drive: {str(e)}")
 
 @router.post("/user/settings")
 async def update_settings(settings: SettingsUpdate, whatsapp_id: str = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -187,7 +241,7 @@ async def add_business(business_name: str, business_gstin: str, whatsapp_id: str
     
     # Initialize Google Drive for new business
     gs = GoogleService(user.google_refresh_token)
-    folder_id, sheet_id, template_id = await gs.initialize_user_drive()
+    folder_id, sheet_id, template_id = await gs.initialize_user_drive(business_name=business_name)
     
     business_id = str(uuid.uuid4())
     new_business = Business(
@@ -531,8 +585,8 @@ async def get_invoice_pdf(whatsapp_id: str, invoice_no: str, db: Session = Depen
         
     gs = GoogleService(user.google_refresh_token)
     user_profile = {
-        "business_name": business.business_name or "Help U Traders",
-        "business_gstin": business.business_gstin or "37ABCDE1234F1Z5"
+        "business_name": business.business_name,
+        "business_gstin": business.business_gstin or ""
     }
     
     pdf_buffer = await gs.generate_invoice_pdf_buffer(business.master_ledger_sheet_id, invoice_no, user_profile)

@@ -75,8 +75,8 @@ class Business(Base):
     __tablename__ = "businesses"
     id = Column(String, primary_key=True, index=True)
     user_whatsapp_id = Column(String, ForeignKey("users.whatsapp_id"))
-    business_name = Column(String, default="Help U Traders")
-    business_gstin = Column(String, default="37ABCDE1234F1Z5")
+    business_name = Column(String, nullable=False) # Mandatory
+    business_gstin = Column(String, nullable=True) # Optional but no default
     drive_folder_id = Column(String)
     master_ledger_sheet_id = Column(String)
     invoice_template_id = Column(String)
@@ -160,14 +160,16 @@ def save_user_token(whatsapp_id: str, email: str, refresh_token: str):
                 db.refresh(new_user)
                 return new_user
             else:
-                # Just update the token
-                existing_user_by_email.google_refresh_token = refresh_token
+                # Just update the token if provided
+                if refresh_token:
+                    existing_user_by_email.google_refresh_token = refresh_token
                 db.commit()
                 db.refresh(existing_user_by_email)
                 return existing_user_by_email
                 
         elif user:
-            user.google_refresh_token = refresh_token
+            if refresh_token:
+                user.google_refresh_token = refresh_token
             user.google_email = email
             db.commit()
             db.refresh(user)

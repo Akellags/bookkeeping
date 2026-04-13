@@ -34,7 +34,7 @@ else:
         cursor.execute("""
             INSERT INTO businesses (id, user_whatsapp_id, business_name, business_gstin, drive_folder_id, master_ledger_sheet_id, is_active)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (business_id, whatsapp_id, b_name or "Help U Traders", b_gstin or "37ABCDE1234F1Z5", d_folder, m_sheet, 1))
+        """, (business_id, whatsapp_id, b_name or "My Business", b_gstin or None, d_folder, m_sheet, 1))
         
         # 3. Update the user with the active_business_id
         cursor.execute("UPDATE users SET active_business_id = ? WHERE whatsapp_id = ?", (business_id, whatsapp_id))
