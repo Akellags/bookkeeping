@@ -43,13 +43,16 @@ gcloud run deploy help-u-backend \
 ### 4. Configure Frontend
 Update your React application to use the Backend Service URL for API calls.
 
-### 5. Deploy Frontend
+### 5. Deploy Frontend (Firebase)
+The frontend is deployed to Firebase Hosting.
 ```bash
 cd src/frontend
-gcloud run deploy help-u-frontend \
-  --source . \
-  --region asia-south1 \
-  --allow-unauthenticated
+# Set environment variables for build
+export VITE_API_BASE_URL="https://bookkeeper-be-486079244466.asia-south1.run.app"
+npm install
+npm run build
+cd ../..
+firebase deploy --only hosting
 ```
 
 ## Automated Deployment

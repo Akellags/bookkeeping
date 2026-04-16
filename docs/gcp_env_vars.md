@@ -1,12 +1,14 @@
 # GCP Environment Variables for PowerShell
 
-To restore your deployment environment after a restart, copy and paste these commands into your **PowerShell** window:
+To restore your deployment environment after a restart, copy and paste these commands into your **PowerShell** window. 
 
-This is only for backend only. We will not use FE as we are hosting the FE on firebase
-for FE take a look at docs\firebase_fe_depolyment_guide.md
+**CRITICAL**: You MUST run these from the project root directory: `c:\Users\ALIENWARE\Projects\helpU\bookkeeper`
 
 ```powershell
-# Project Configuration
+# 0. Go to Project Root
+cd "c:\Users\ALIENWARE\Projects\helpU\bookkeeper"
+
+# 1. Project Configuration
 $env:PROJECT_ID="help-u-488511"
 $env:REGION="asia-south1"
 $env:REPO_ROOT="c:\Users\ALIENWARE\Projects\helpU\bookkeeper"
@@ -25,8 +27,8 @@ echo "Frontend: $env:FRONTEND_URL"
 
 ## Deployment Commands Reference
 
-### 1. FASTEST Backend Deploy (Builds on Cloud)
-Recommended method—takes ~2 mins and ensures latest code is deployed without local push overhead.
+### 1. Final Backend Deploy (Cloud Run)
+Full deployment including WhatsApp.
 ```powershell
 gcloud run deploy bookkeeper-be `
   --source . `
@@ -34,47 +36,37 @@ gcloud run deploy bookkeeper-be `
   --service-account=bookkeeper-be-sa@$env:PROJECT_ID.iam.gserviceaccount.com `
   --add-cloudsql-instances=$env:INSTANCE_CONNECTION_NAME `
   --allow-unauthenticated `
-  --set-secrets="DB_PASS=DB_PASSWORD:latest,SECRET_KEY=JWT_SECRET:latest,OPENAI_API_KEY=OPENAI_API_KEY:latest,GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:latest,GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest,/secrets/google/google_creds.json=GOOGLE_CREDS_JSON:latest" `
-  --set-env-vars="ENV=production,DB_NAME=postgres,DB_USER=postgres,INSTANCE_CONNECTION_NAME=$env:INSTANCE_CONNECTION_NAME,FRONTEND_URL=$env:FRONTEND_URL,GOOGLE_REDIRECT_URI=$env:BACKEND_URL/auth/callback,GOOGLE_APPLICATION_CREDENTIALS=/secrets/google/google_creds.json"
-```
-
-### 2. Full Backend Deploy (With WhatsApp)
-Once WhatsApp keys are ready, add them to the command:
-```powershell
-gcloud run deploy bookkeeper-be `
-  --source . `
-  --region=$env:REGION `
-  --service-account=bookkeeper-be-sa@$env:PROJECT_ID.iam.gserviceaccount.com `
-  --add-cloudsql-instances=$env:INSTANCE_CONNECTION_NAME `
-  --allow-unauthenticated `
+  --command="uvicorn" `
+  --args="src.main:app,--host,0.0.0.0,--port,8080" `
   --set-secrets="DB_PASS=DB_PASSWORD:latest,SECRET_KEY=JWT_SECRET:latest,OPENAI_API_KEY=OPENAI_API_KEY:latest,GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:latest,GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest,META_ACCESS_TOKEN=WHATSAPP_TOKEN:latest,META_PHONE_NUMBER_ID=META_PHONE_NUMBER_ID:latest,WHATSAPP_VERIFY_TOKEN=WHATSAPP_VERIFY_TOKEN:latest,/secrets/google/google_creds.json=GOOGLE_CREDS_JSON:latest" `
-  --set-env-vars="ENV=production,DB_NAME=postgres,DB_USER=postgres,INSTANCE_CONNECTION_NAME=$env:INSTANCE_CONNECTION_NAME,FRONTEND_URL=$env:FRONTEND_URL,GOOGLE_REDIRECT_URI=$env:BACKEND_URL/auth/callback,GOOGLE_APPLICATION_CREDENTIALS=/secrets/google/google_creds.json"
+  --set-env-vars="ENV=production,DB_NAME=postgres,DB_USER=postgres,INSTANCE_CONNECTION_NAME=$env:INSTANCE_CONNECTION_NAME,FRONTEND_URL=$env:FRONTEND_URL,GOOGLE_REDIRECT_URI=$env:BACKEND_URL/auth/callback,GOOGLE_APPLICATION_CREDENTIALS=/secrets/google/google_creds.json,GOOGLE_CLOUD_PROJECT=$env:PROJECT_ID,DOCUMENT_AI_LOCATION=us,DOCUMENT_AI_PROCESSOR_ID=7e43aab74a60ef04,VERTEX_AI_LOCATION=us-central1,VERTEX_AI_MODEL=gemini-2.5-flash,DEFAULT_EXTRACTION_PROVIDER=google,ENABLE_OPENAI_FALLBACK=true"
 ```
 
-### 3. Frontend Deploy (FASTEST - Builds on Cloud)
-Recommended method—takes ~2 mins.
+### 1b. Minimal Backend Deploy (No WhatsApp)
+Use this for testing Google Extraction without WhatsApp overhead.
 ```powershell
-cd src/frontend
-gcloud run deploy bookkeeper-fe `
+gcloud run deploy bookkeeper-be `
   --source . `
   --region=$env:REGION `
+  --service-account=bookkeeper-be-sa@$env:PROJECT_ID.iam.gserviceaccount.com `
+  --add-cloudsql-instances=$env:INSTANCE_CONNECTION_NAME `
   --allow-unauthenticated `
-  --set-build-env-vars="VITE_API_BASE_URL=$env:BACKEND_URL"
+  --command="uvicorn" `
+  --args="src.main:app,--host,0.0.0.0,--port,8080" `
+  --set-secrets="DB_PASS=DB_PASSWORD:latest,SECRET_KEY=JWT_SECRET:latest,OPENAI_API_KEY=OPENAI_API_KEY:latest,GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:latest,GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest,/secrets/google/google_creds.json=GOOGLE_CREDS_JSON:latest" `
+  --set-env-vars="ENV=production,DB_NAME=postgres,DB_USER=postgres,INSTANCE_CONNECTION_NAME=$env:INSTANCE_CONNECTION_NAME,FRONTEND_URL=$env:FRONTEND_URL,GOOGLE_REDIRECT_URI=$env:BACKEND_URL/auth/callback,GOOGLE_APPLICATION_CREDENTIALS=/secrets/google/google_creds.json,GOOGLE_CLOUD_PROJECT=$env:PROJECT_ID,DOCUMENT_AI_LOCATION=us,DOCUMENT_AI_PROCESSOR_ID=7e43aab74a60ef04,VERTEX_AI_LOCATION=us-central1,VERTEX_AI_MODEL=gemini-2.5-flash,DEFAULT_EXTRACTION_PROVIDER=google,ENABLE_OPENAI_FALLBACK=true"
 ```
 
-### 4. Frontend Deploy (Local Docker Method)
-Use this if you prefer building locally and pushing to registry.
+### 2. Frontend Deploy (Firebase)
+Frontend is ONLY deployed to Firebase. 
 ```powershell
-cd src/frontend
-docker build `
-  -f Dockerfile `
-  -t $env:REGION-docker.pkg.dev/$env:PROJECT_ID/bookkeeper-fe-repo/bookkeeper-fe:latest `
-  --build-arg VITE_API_BASE_URL=$env:BACKEND_URL `
-  .
-docker push $env:REGION-docker.pkg.dev/$env:PROJECT_ID/bookkeeper-fe-repo/bookkeeper-fe:latest
+# 1. Set the Backend Environment Variable (if not already set)
+$env:VITE_API_BASE_URL="https://bookkeeper-be-486079244466.asia-south1.run.app"
 
-gcloud run deploy bookkeeper-fe `
-  --image=$env:REGION-docker.pkg.dev/$env:PROJECT_ID/bookkeeper-fe-repo/bookkeeper-fe:latest `
-  --region=$env:REGION `
-  --allow-unauthenticated
+# 2. Build and Deploy
+cd src/frontend
+npm install
+npm run build
+cd ../..
+firebase deploy --only hosting
 ```

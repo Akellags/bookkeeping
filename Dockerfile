@@ -14,7 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src/ ./src/
 
-ENV PYTHONPATH=/app/src
+ENV PYTHONPATH=/app
 ENV PORT=8080
 
 # Expose the port FastAPI runs on

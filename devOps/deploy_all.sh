@@ -29,15 +29,15 @@ echo "✅ Backend deployed at: $BACKEND_URL"
 # cd src/frontend
 # echo "VITE_API_URL=$BACKEND_URL" > .env.production
 
-# 4. Deploy Frontend
-echo "📦 Deploying Frontend ($FRONTEND_SERVICE)..."
+# 4. Deploy Frontend to Firebase
+echo "📦 Deploying Frontend to Firebase..."
 cd src/frontend
-gcloud run deploy $FRONTEND_SERVICE \
-  --source . \
-  --region $REGION \
-  --allow-unauthenticated
+export VITE_API_BASE_URL=$BACKEND_URL
+npm install
+npm run build
+cd ../..
+firebase deploy --only hosting
 
 echo "🎉 Deployment Complete!"
-FRONTEND_URL=$(gcloud run services describe $FRONTEND_SERVICE --region $REGION --format='value(status.url)')
-echo "🔗 Frontend URL: $FRONTEND_URL"
 echo "🔗 Backend URL: $BACKEND_URL"
+echo "🔗 Frontend URL: https://books.helpsu.ai"

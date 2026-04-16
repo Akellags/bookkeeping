@@ -59,6 +59,7 @@ const RecordTransaction = () => {
     reverse_charge: 'N',
     items: [
       { 
+        description: '',
         hsn_code: '', 
         hsn_description: '', 
         uqc: 'PCS', 
@@ -152,7 +153,7 @@ const RecordTransaction = () => {
     setFormData({
       ...formData,
       items: [...formData.items, { 
-        hsn_code: '', hsn_description: '', uqc: 'PCS', quantity: 1, 
+        description: '', hsn_code: '', hsn_description: '', uqc: 'PCS', quantity: 1, 
         unit_price: 0, gst_rate: 18, taxable_value: 0, cgst: 0, sgst: 0, igst: 0, total_amount: 0 
       }]
     });
@@ -231,23 +232,37 @@ const RecordTransaction = () => {
       pGstin = data.vendor_gstin || data.recipient_gstin || data.party_gstin || '';
     }
 
+    // Handle DD-MM-YYYY or DD-MM-YY to YYYY-MM-DD for input[type="date"]
+    let formattedDate = '';
+    if (data.date) {
+      const parts = data.date.split('-');
+      if (parts.length === 3) {
+        let [d, m, y] = parts;
+        if (y.length === 2) y = '20' + y;
+        formattedDate = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+      }
+    }
+
+    const aiItems = data.items || data.line_items || [];
+
     setFormData(prev => ({
       ...prev,
       party_name: pName,
       party_gstin: pGstin,
       invoice_no: data.invoice_no || '',
-      date: data.date ? data.date.split('-').reverse().join('-') : prev.date,
+      date: formattedDate || prev.date,
       place_of_supply: data.place_of_supply || '',
       reverse_charge: data.reverse_charge || 'N',
-      items: data.items && data.items.length > 0 ? data.items.map(item => {
+      items: aiItems.length > 0 ? aiItems.map(item => {
         const qty = item.quantity || 1;
         const totalTaxable = item.taxable_value || 0;
         return {
+          description: item.description || item.item_name || item.product_description || '',
           hsn_code: item.hsn_code || '',
           hsn_description: item.hsn_description || '',
           uqc: item.uqc || 'PCS',
           quantity: qty,
-          unit_price: (totalTaxable / qty).toFixed(2),
+          unit_price: item.rate || (totalTaxable / qty).toFixed(2),
           gst_rate: item.gst_rate || 18,
           taxable_value: totalTaxable,
           cgst: item.cgst || 0,
@@ -345,7 +360,7 @@ const RecordTransaction = () => {
       invoice_no: '',
       place_of_supply: '',
       reverse_charge: 'N',
-      items: [{ hsn_code: '', hsn_description: '', uqc: 'PCS', quantity: 1, unit_price: 0, gst_rate: 18, taxable_value: 0, cgst: 0, sgst: 0, igst: 0, total_amount: 0 }],
+      items: [{ description: '', hsn_code: '', hsn_description: '', uqc: 'PCS', quantity: 1, unit_price: 0, gst_rate: 18, taxable_value: 0, cgst: 0, sgst: 0, igst: 0, total_amount: 0 }],
       total_amount: 0,
       category: '',
       payment_mode: 'Cash',
@@ -520,8 +535,8 @@ const RecordTransaction = () => {
                     <td className="py-6 px-4">
                       <input 
                         type="text" 
-                        value={item.hsn_description} 
-                        onChange={(e) => handleItemChange(idx, 'hsn_description', e.target.value)} 
+                        value={item.description} 
+                        onChange={(e) => handleItemChange(idx, 'description', e.target.value)} 
                         placeholder="Item name / service" 
                         className="w-full bg-transparent font-bold outline-none placeholder:text-gray-300 focus:text-blue-600" 
                       />

@@ -6,8 +6,6 @@ __pycache__
 .git
 .gitignore
 google_creds.json
-Dockerfile
-.dockerignore
 docs/
 tests/
 temp_media/

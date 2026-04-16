@@ -28,7 +28,9 @@ class ExtractionOrchestrator:
         logger.info(f"Using extractor: {provider} for user: {req.user_id}")
         
         try:
-            return await extractor.extract(req)
+            result = await extractor.extract(req)
+            logger.info(f"SUCCESS: Extraction completed by provider: {result.extraction_provider} for user: {req.user_id}")
+            return result
         except Exception as e:
             logger.error(f"Extraction failed for provider {provider}: {e}")
             
@@ -36,7 +38,9 @@ class ExtractionOrchestrator:
             if provider == "google" and os.getenv("ENABLE_OPENAI_FALLBACK", "true").lower() == "true":
                 logger.info("Retrying with OpenAI fallback...")
                 req.extraction_provider = "openai"
-                return await self.extractors["openai"].extract(req)
+                result = await self.extractors["openai"].extract(req)
+                logger.info(f"SUCCESS: Extraction completed by FALLBACK provider: {result.extraction_provider} for user: {req.user_id}")
+                return result
             
             raise
 
