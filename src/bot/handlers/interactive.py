@@ -308,25 +308,11 @@ async def _handle_confirmation(db: Session, user: User, business: Business, tx: 
             mime_type = "image/jpeg"
             if tx.media_url.lower().endswith(".pdf"):
                 mime_type = "application/pdf"
-                # For Vision analysis we still might want to convert to image first if using OpenAI
-                # But our GoogleExtractor can handle PDF directly. 
-                # Let's see if we can convert if needed by checking provider
                 
             provider = "openai"
             if os.getenv("DEFAULT_EXTRACTION_PROVIDER") == "google":
                 provider = "google"
             
-            # OpenAI vision still needs image. Google can take PDF.
-            # If provider is openai and it's a PDF, we convert.
-            temp_image_to_delete = None
-            if provider == "openai" and tx.media_url.lower().endswith(".pdf"):
-                logger.info(f"Converting PDF to image for OpenAI Vision: {tx.media_url}")
-                image_path = convert_pdf_to_image(tx.media_url)
-                if image_path:
-                    target_path = image_path
-                    mime_type = "image/jpeg"
-                    temp_image_to_delete = image_path
-
             req = ExtractionRequest(
                 user_id=user.whatsapp_id,
                 business_id=business.id,
@@ -350,9 +336,6 @@ async def _handle_confirmation(db: Session, user: User, business: Business, tx: 
                 tx.review_reason = extraction_result.review_reason
                 
                 db.commit()
-            
-            if temp_image_to_delete and os.path.exists(temp_image_to_delete):
-                os.remove(temp_image_to_delete)
 
         except Exception as e:
             logger.error(f"Interactive: Error during AI extraction: {e}")
@@ -456,8 +439,18 @@ async def _finalize_transaction(db: Session, user: User, business: Business, tx:
             }]
 
             invoice_no = extraction.get("invoice_no", f"INV-{uuid.uuid4().hex[:6].upper()}")
+            # Robust Place of Supply logic for WhatsApp extraction
+            pos_input = (extraction.get("place_of_supply") or "").strip()
             business_state_code = (business.business_gstin or "37")[:2]
-            pos_state_code = get_state_code(extraction.get("place_of_supply", business_state_code))
+            if not pos_input:
+                recipient_gstin = extraction.get("recipient_gstin", "")
+                if recipient_gstin and len(recipient_gstin) >= 2:
+                    pos_state_code = recipient_gstin[:2]
+                else:
+                    pos_state_code = business_state_code
+            else:
+                pos_state_code = get_state_code(pos_input)
+
             is_intra_state = (business_state_code == pos_state_code)
 
             last_index = 0
@@ -490,7 +483,18 @@ async def _finalize_transaction(db: Session, user: User, business: Business, tx:
                 except:
                     pass
 
-        # Parallelize Background Tasks (Image Upload & Invoice Generation)
+        tx.status = "COMPLETED"
+        user.last_interaction_type = "AWAITING_PAYMENT"
+        user.last_interaction_data = {"row_index": last_index, "old_row": row, "transaction_type": final_type}
+        db.commit()
+        
+        # 1. Send Success Message immediately to unblock user experience
+        send_whatsapp_text(user.whatsapp_id, f"✅ Recorded as {final_type}!")
+        send_whatsapp_interactive(user.whatsapp_id, f"Is this {final_type} Paid or on Credit (Udhaar)?", ["Paid", "Credit"])
+
+        # 2. Parallelize Background Tasks (Image Upload & Invoice Generation) AFTER response
+        # We still await them here because we are already in a background task (FastAPI BackgroundTasks),
+        # so this won't block the webhook response, but we want the user to see the WhatsApp message first.
         tasks = []
         if tx.media_url and os.path.exists(tx.media_url):
             tasks.append(gs.upload_bill_image(tx.media_url, business.drive_folder_id))
@@ -509,17 +513,11 @@ async def _finalize_transaction(db: Session, user: User, business: Business, tx:
         if tasks:
             import asyncio
             start_bg = time.time()
+            # Run background tasks but don't let them block the handler return if they fail
             await asyncio.gather(*tasks, return_exceptions=True)
             if tx.media_url and os.path.exists(tx.media_url): os.remove(tx.media_url)
-            print(f"  [TIMER] Parallel Background Tasks: {time.time() - start_bg:.2f}s")
+            logger.info(f"  [TIMER] Parallel Background Tasks: {time.time() - start_bg:.2f}s")
 
-        tx.status = "COMPLETED"
-        user.last_interaction_type = "AWAITING_PAYMENT"
-        user.last_interaction_data = {"row_index": last_index, "old_row": row, "transaction_type": final_type}
-        db.commit()
-        
-        send_whatsapp_text(user.whatsapp_id, f"✅ Recorded as {final_type}!")
-        send_whatsapp_interactive(user.whatsapp_id, f"Is this {final_type} Paid or on Credit (Udhaar)?", ["Paid", "Credit"])
         return {"status": "completed"}
 
     except Exception as e:

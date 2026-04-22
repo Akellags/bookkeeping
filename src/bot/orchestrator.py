@@ -66,10 +66,13 @@ class WhatsAppOrchestrator:
                             except IntegrityError:
                                 self.db.rollback()
                                 logger.info(f"Skipping already processed message: {message_id}")
-                                results.append({"status": "already_processed"})
                                 continue
                             except Exception as e:
                                 self.db.rollback()
+                                # Check if it's a duplicate key error even if not caught by IntegrityError
+                                if "duplicate key" in str(e).lower() or "23505" in str(e):
+                                    logger.info(f"Message already processed (detected via string match), skipping: {message_id}")
+                                    continue
                                 logger.error(f"Database error in idempotency check: {e}")
                                 # Continue processing anyway if it's not a duplicate constraint
 

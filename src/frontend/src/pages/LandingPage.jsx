@@ -21,7 +21,15 @@ const LandingPage = () => {
   const getApiBaseUrl = () => {
     const envUrl = import.meta.env.VITE_API_BASE_URL;
     if (envUrl) return envUrl;
-    if (window.location.hostname.includes('-fe-')) {
+    
+    const hostname = window.location.hostname;
+
+    // Production fallback
+    if (hostname === 'books.helpsu.ai' || hostname === 'www.books.helpsu.ai') {
+      return 'https://bookkeeper-be-486079244466.asia-south1.run.app';
+    }
+
+    if (hostname.includes('-fe-')) {
       return window.location.origin.replace('-fe-', '-be-');
     }
     return '';

@@ -8,6 +8,7 @@ from openai import AsyncOpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
 from src.extraction.base import BaseExtractor
 from src.extraction.schemas import ExtractionRequest, ExtractionResult, CanonicalTransaction
+from src.utils import convert_pdf_to_images
 
 logger = logging.getLogger(__name__)
 
@@ -115,9 +116,8 @@ class OpenAIExtractor(BaseExtractor):
         if req.mime_type.startswith("image/"):
             result = await self._extract_from_image(req)
         elif req.mime_type == "application/pdf":
-            # For OpenAI, we convert PDF to image for vision or use text if vision fails
-            # Currently we convert in the caller, but let's assume we get image-like data if it's already converted
-            result = await self._extract_from_image(req)
+            # For OpenAI, convert PDF to multiple images for multi-page vision analysis
+            result = await self._extract_from_pdf(req)
         else:
             # Fallback to text extraction for other types
             result = await self._extract_from_text(req)
@@ -125,6 +125,47 @@ class OpenAIExtractor(BaseExtractor):
         end_time = time.time()
         logger.info(f"TOTAL OpenAI Extraction took {end_time - start_time:.2f} seconds")
         return result
+
+    async def _extract_from_pdf(self, req: ExtractionRequest) -> ExtractionResult:
+        """Handles multi-page PDF extraction by converting to multiple images."""
+        image_paths = convert_pdf_to_images(req.media_path)
+        if not image_paths:
+            # Fallback to text if conversion fails
+            return await self._extract_from_text(req)
+            
+        try:
+            content = [{"type": "text", "text": "Extract GST data from these bill images. This is a multi-page invoice. Consolidate all line items and metadata across all pages into a single JSON object."}]
+            
+            for path in image_paths:
+                with open(path, "rb") as f:
+                    encoded = base64.b64encode(f.read()).decode('utf-8')
+                content.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{encoded}"}
+                })
+            
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": content}
+                ],
+                response_format={"type": "json_object"}
+            )
+            
+            raw_json = json.loads(response.choices[0].message.content)
+            canonical = CanonicalTransaction(**raw_json)
+            
+            return ExtractionResult(
+                extraction_provider="openai",
+                provider_model=self.model,
+                canonical_data=canonical
+            )
+        finally:
+            # Cleanup temporary images
+            for path in image_paths:
+                if os.path.exists(path):
+                    os.remove(path)
 
     async def _extract_from_image(self, req: ExtractionRequest) -> ExtractionResult:
         with open(req.media_path, "rb") as f:

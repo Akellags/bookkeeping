@@ -14,12 +14,20 @@ from src.ai_processor import AIProcessor
 from src.transcription_service import TranscriptionService
 from src.consultant_agent import ConsultantAgent
 from src.google_service import GoogleService
+from src.extraction.google_extractor import GoogleExtractor
 
 logger = logging.getLogger(__name__)
 
 ai_processor = AIProcessor()
 transcription_service = TranscriptionService()
 consultant_agent = ConsultantAgent()
+google_extractor = GoogleExtractor()
+
+async def _get_extraction(text: str):
+    """Internal helper to choose extraction provider based on environment"""
+    if os.getenv("DEFAULT_EXTRACTION_PROVIDER") == "google":
+        return await google_extractor.extract_text(text)
+    return ai_processor.process_sales_text(text)
 
 async def handle_command(db: Session, user: User, business: Business, message_data: dict):
     """Handles text and audio commands/messages"""
@@ -33,7 +41,7 @@ async def handle_command(db: Session, user: User, business: Business, message_da
         if media_url:
             local_path = os.path.join("temp_media", f"audio_{audio_id}.ogg")
             download_whatsapp_media(media_url, local_path)
-            text, _ = transcription_service.transcribe_audio(local_path)
+            text, _ = await transcription_service.transcribe_audio(local_path)
             if os.path.exists(local_path):
                 os.remove(local_path)
         if not text:
@@ -161,7 +169,7 @@ async def _handle_awaiting_gstin(db: Session, user: User, business: Business, te
 async def _handle_awaiting_edit(db: Session, user: User, business: Business, text: str):
     if not user.last_interaction_data:
         return {"status": "error_no_data"}
-    extraction = ai_processor.process_sales_text(text)
+    extraction = await _get_extraction(text)
     if extraction and extraction.get("is_correction"):
         row_index = user.last_interaction_data.get("row_index")
         old_row = user.last_interaction_data.get("old_row")
@@ -276,7 +284,7 @@ async def _process_new_transaction(db: Session, user: User, business: Business, 
         Transaction.status == "AWAITING_DETAILS"
     ).order_by(Transaction.created_at.desc()).first()
 
-    extraction = ai_processor.process_sales_text(text)
+    extraction = await _get_extraction(text)
     if not extraction or not extraction.get("is_transaction"):
         if tx:
             # If we were awaiting details, maybe this text *is* the detail but AI failed to parse as full tx?

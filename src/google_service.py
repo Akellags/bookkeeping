@@ -51,8 +51,8 @@ class GoogleService:
             token=None,
             refresh_token=refresh_token,
             token_uri="https://oauth2.googleapis.com/token",
-            client_id=os.getenv("GOOGLE_CLIENT_ID"),
-            client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
+            client_id=(os.getenv("GOOGLE_CLIENT_ID") or "").strip(),
+            client_secret=(os.getenv("GOOGLE_CLIENT_SECRET") or "").strip(),
             scopes=["https://www.googleapis.com/auth/drive.file"]
         )
         
@@ -361,7 +361,7 @@ class GoogleService:
         
         min_inv = None
         max_inv = None
-        total_docs = 0
+        unique_invoices = set()
         
         for row in data_rows:
             if len(row) < 15: continue
@@ -375,8 +375,9 @@ class GoogleService:
             inv_month, inv_year = date_parts[1], date_parts[2]
             if inv_month != target_month or inv_year != target_year: continue
 
-            total_docs += 1
             inv_no = str(row[2]).strip().upper()
+            unique_invoices.add(inv_no)
+            
             if not min_inv or inv_no < min_inv: min_inv = inv_no
             if not max_inv or inv_no > max_inv: max_inv = inv_no
 
@@ -408,6 +409,8 @@ class GoogleService:
                 if invoice:
                     item_detail["num"] = len(invoice["itms"]) + 1
                     invoice["itms"].append(item_detail)
+                    # Accumulate Total Invoice Value (Sum of line totals)
+                    invoice["val"] = round(invoice["val"] + float(row[4] or 0), 2)
                 else:
                     invoice = {
                         "inum": inv_no, "idt": row[3], "val": round(float(row[4] or 0), 2),
@@ -460,6 +463,7 @@ class GoogleService:
                     "csamt": round(float(row[18] or 0), 2)
                 })
 
+        total_docs = len(unique_invoices)
         return {
             "gstin": gstin, "fp": fp, "gt": 0.00, "cur_gt": 0.00,
             "b2b": b2b_invoices, "b2cs": b2cs_invoices, "hsn": {"data": hsn_data},
@@ -477,8 +481,12 @@ class GoogleService:
         if not rows or len(rows) <= 1:
             return None
             
-        invoice_row = next((row for row in rows[1:] if len(row) > 2 and row[2] == invoice_no), None)
-        if not invoice_row: return None
+        # Find all rows matching this invoice number
+        invoice_rows = [row for row in rows[1:] if len(row) > 2 and row[2] == invoice_no]
+        if not invoice_rows: return None
+        
+        # Use first row for general invoice metadata
+        first_row = invoice_rows[0]
 
         buffer = BytesIO()
         p = canvas.Canvas(buffer, pagesize=A4)
@@ -494,43 +502,81 @@ class GoogleService:
         
         # Details
         p.setFont("Helvetica", 11)
-        p.drawString(2*cm, height-5*cm, f"Invoice No: {invoice_row[2]}")
-        p.drawString(2*cm, height-5.6*cm, f"Date: {invoice_row[3]}")
-        p.drawString(12*cm, height-5*cm, f"Bill To: {invoice_row[1]}")
-        if len(invoice_row) > 0 and invoice_row[0]:
-            p.drawString(12*cm, height-5.6*cm, f"GSTIN: {invoice_row[0]}")
+        p.drawString(2*cm, height-5*cm, f"Invoice No: {first_row[2]}")
+        p.drawString(2*cm, height-5.6*cm, f"Date: {first_row[3]}")
+        p.drawString(12*cm, height-5*cm, f"Bill To: {first_row[1]}")
+        if len(first_row) > 0 and first_row[0]:
+            p.drawString(12*cm, height-5.6*cm, f"GSTIN: {first_row[0]}")
 
-        # Table
-        p.line(2*cm, height-7*cm, width-2*cm, height-7*cm)
+        # Table Header
+        y_pos = height-7*cm
+        p.line(2*cm, y_pos, width-2*cm, y_pos)
+        y_pos -= 0.5*cm
         p.setFont("Helvetica-Bold", 10)
-        p.drawString(2.2*cm, height-7.5*cm, "Description")
-        p.drawString(8*cm, height-7.5*cm, "HSN")
-        p.drawString(10*cm, height-7.5*cm, "Rate")
-        p.drawString(12*cm, height-7.5*cm, "Taxable Value")
-        p.drawString(16*cm, height-7.5*cm, "Total")
-        p.line(2*cm, height-8*cm, width-2*cm, height-8*cm)
+        p.drawString(2.2*cm, y_pos, "Description")
+        p.drawString(8*cm, y_pos, "HSN")
+        p.drawString(10*cm, y_pos, "Rate")
+        p.drawString(12*cm, y_pos, "Taxable Value")
+        p.drawString(16*cm, y_pos, "Total")
+        y_pos -= 0.5*cm
+        p.line(2*cm, y_pos, width-2*cm, y_pos)
 
+        # Table Rows
         p.setFont("Helvetica", 10)
-        p.drawString(2.2*cm, height-8.6*cm, invoice_row[10] if len(invoice_row) > 10 else "Goods/Services")
-        p.drawString(8*cm, height-8.6*cm, invoice_row[9] if len(invoice_row) > 9 else "")
-        p.drawString(10*cm, height-8.6*cm, f"{invoice_row[13]}%" if len(invoice_row) > 13 else "0%")
-        p.drawString(12*cm, height-8.6*cm, f"Rs. {invoice_row[14]}" if len(invoice_row) > 14 else "Rs. 0")
-        p.drawString(16*cm, height-8.6*cm, f"Rs. {invoice_row[4]}" if len(invoice_row) > 4 else "Rs. 0")
+        total_taxable = 0.0
+        total_cgst = 0.0
+        total_sgst = 0.0
+        total_igst = 0.0
+        grand_total = 0.0
+        
+        y_pos -= 0.6*cm
+        for row in invoice_rows:
+            if y_pos < 5*cm: # Basic pagination check
+                p.showPage()
+                y_pos = height - 2*cm
+                p.setFont("Helvetica", 10)
+
+            p.drawString(2.2*cm, y_pos, row[10] if len(row) > 10 else "Goods/Services")
+            p.drawString(8*cm, y_pos, row[9] if len(row) > 9 else "")
+            p.drawString(10*cm, y_pos, f"{row[13]}%" if len(row) > 13 else "0%")
+            p.drawString(12*cm, y_pos, f"Rs. {row[14]}" if len(row) > 14 else "Rs. 0")
+            p.drawString(16*cm, y_pos, f"Rs. {row[4]}" if len(row) > 4 else "Rs. 0")
+            
+            # Accumulate totals
+            try:
+                total_taxable += float(row[14] or 0)
+                total_cgst += float(row[15] or 0)
+                total_sgst += float(row[16] or 0)
+                total_igst += float(row[17] or 0)
+                grand_total += float(row[4] or 0)
+            except: pass
+            
+            y_pos -= 0.6*cm
 
         # Summary
-        p.line(10*cm, height-10*cm, width-2*cm, height-10*cm)
-        p.drawString(11*cm, height-10.6*cm, "Taxable Value:")
-        p.drawRightString(width-2.5*cm, height-10.6*cm, f"{invoice_row[14]}" if len(invoice_row) > 14 else "0")
-        p.drawString(11*cm, height-11.2*cm, "CGST:")
-        p.drawRightString(width-2.5*cm, height-11.2*cm, f"{invoice_row[15]}" if len(invoice_row) > 15 else "0")
-        p.drawString(11*cm, height-11.8*cm, "SGST:")
-        p.drawRightString(width-2.5*cm, height-11.8*cm, f"{invoice_row[16]}" if len(invoice_row) > 16 else "0")
-        p.drawString(11*cm, height-12.4*cm, "IGST:")
-        p.drawRightString(width-2.5*cm, height-12.4*cm, f"{invoice_row[17]}" if len(invoice_row) > 17 else "0")
+        y_pos -= 0.4*cm
+        if y_pos < 6*cm:
+            p.showPage()
+            y_pos = height - 2*cm
+            
+        p.line(10*cm, y_pos, width-2*cm, y_pos)
+        y_pos -= 0.6*cm
+        p.drawString(11*cm, y_pos, "Taxable Value:")
+        p.drawRightString(width-2.5*cm, y_pos, f"{total_taxable:.2f}")
+        y_pos -= 0.6*cm
+        p.drawString(11*cm, y_pos, "CGST:")
+        p.drawRightString(width-2.5*cm, y_pos, f"{total_cgst:.2f}")
+        y_pos -= 0.6*cm
+        p.drawString(11*cm, y_pos, "SGST:")
+        p.drawRightString(width-2.5*cm, y_pos, f"{total_sgst:.2f}")
+        y_pos -= 0.6*cm
+        p.drawString(11*cm, y_pos, "IGST:")
+        p.drawRightString(width-2.5*cm, y_pos, f"{total_igst:.2f}")
         
+        y_pos -= 1.0*cm
         p.setFont("Helvetica-Bold", 11)
-        p.drawString(11*cm, height-13.4*cm, "Total Amount:")
-        p.drawRightString(width-2.5*cm, height-13.4*cm, f"Rs. {invoice_row[4]}" if len(invoice_row) > 4 else "Rs. 0")
+        p.drawString(11*cm, y_pos, "Total Amount:")
+        p.drawRightString(width-2.5*cm, y_pos, f"Rs. {grand_total:.2f}")
 
         p.setFont("Helvetica-Oblique", 8)
         p.drawCentredString(width/2, 2*cm, "This is a computer generated invoice.")
@@ -706,6 +752,7 @@ class GoogleService:
 
     async def upload_bill_image(self, file_path: str, folder_id: str):
         """Uploads an image or PDF file to Google Drive"""
+        start_time = time.time()
         if not os.path.exists(file_path): return None
         file_name = os.path.basename(file_path)
         with open(file_path, "rb") as f:
@@ -717,10 +764,13 @@ class GoogleService:
         elif file_name.lower().endswith(".png"):
             mime_type = "image/png"
             
-        return await self.upload_file_to_drive(folder_id, file_name, content, mime_type=mime_type)
+        res = await self.upload_file_to_drive(folder_id, file_name, content, mime_type=mime_type)
+        logger.info(f"  [TIMER] Google Drive Upload: {time.time() - start_time:.2f}s")
+        return res
 
     async def generate_sales_invoice(self, template_id: str, data: dict, folder_id: str):
         """Generates a doc from template, replaces placeholders, and saves it in folder_id"""
+        start_time = time.time()
         loop = asyncio.get_event_loop()
         copy_metadata = {"name": f"Invoice_{data.get('invoice_no', 'N/A')}", "parents": [folder_id]}
         doc = await loop.run_in_executor(None, lambda: self.drive_service.files().copy(fileId=template_id, body=copy_metadata, fields="id").execute())
@@ -737,4 +787,6 @@ class GoogleService:
             
         if requests:
             await loop.run_in_executor(None, lambda: self.docs_service.documents().batchUpdate(documentId=doc_id, body={"requests": requests}).execute())
+        
+        logger.info(f"  [TIMER] Google Doc Invoice Generation: {time.time() - start_time:.2f}s")
         return doc_id

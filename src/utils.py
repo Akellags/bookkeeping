@@ -12,9 +12,9 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-META_ACCESS_TOKEN = os.getenv("META_ACCESS_TOKEN")
-SECRET_KEY = os.getenv("SECRET_KEY", "your-fallback-secret-key-for-dev")
-POPPLER_PATH = os.getenv("POPPLER_PATH") # Optional for Windows testing
+META_ACCESS_TOKEN = (os.getenv("META_ACCESS_TOKEN") or "").strip()
+SECRET_KEY = (os.getenv("SECRET_KEY", "your-fallback-secret-key-for-dev")).strip()
+POPPLER_PATH = (os.getenv("POPPLER_PATH") or "").strip() # Optional for Windows testing
 
 def create_access_token(whatsapp_id: str, expires_delta: timedelta = None) -> str:
     """Generates a long-term JWT for application session authentication"""
@@ -89,7 +89,7 @@ def get_whatsapp_media_url(media_id: str):
     """Retrieves the direct download URL for a media ID from Meta's servers"""
     try:
         token = os.getenv("META_ACCESS_TOKEN")
-        url = f"https://graph.facebook.com/v18.0/{media_id}"
+        url = f"https://graph.facebook.com/v24.0/{media_id}"
         headers = {"Authorization": f"Bearer {token}"}
         response = requests.get(url, headers=headers)
         if response.status_code != 200:
@@ -138,6 +138,9 @@ def get_state_code(state_name: str) -> str:
     }
     normalized = str(state_name).strip().upper()
     
+    if not normalized:
+        return "37"
+    
     if normalized.isdigit() and len(normalized) == 2:
         return normalized
     
@@ -145,7 +148,7 @@ def get_state_code(state_name: str) -> str:
         return mapping[normalized]
     
     for name, code in mapping.items():
-        if name in normalized or normalized in name:
+        if len(normalized) > 2 and (name in normalized or normalized in name):
             return code
             
     return "37"
@@ -216,7 +219,7 @@ def send_whatsapp_interactive(recipient_id: str, body: str, buttons: list, phone
     try:
         phone_id = phone_number_id or os.getenv("META_PHONE_NUMBER_ID")
         token = os.getenv("META_ACCESS_TOKEN")
-        url = f"https://graph.facebook.com/v17.0/{phone_id}/messages"
+        url = f"https://graph.facebook.com/v24.0/{phone_id}/messages"
         headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json"
@@ -286,7 +289,7 @@ def send_whatsapp_text(recipient_id: str, text: str, phone_number_id: str = None
     try:
         phone_id = phone_number_id or os.getenv("META_PHONE_NUMBER_ID")
         token = os.getenv("META_ACCESS_TOKEN")
-        url = f"https://graph.facebook.com/v17.0/{phone_id}/messages"
+        url = f"https://graph.facebook.com/v24.0/{phone_id}/messages"
         headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json"
@@ -309,7 +312,7 @@ def upload_whatsapp_media(file_path: str, phone_number_id: str = None):
     try:
         phone_id = phone_number_id or os.getenv("META_PHONE_NUMBER_ID")
         token = os.getenv("META_ACCESS_TOKEN")
-        url = f"https://graph.facebook.com/v17.0/{phone_id}/media"
+        url = f"https://graph.facebook.com/v24.0/{phone_id}/media"
         headers = {"Authorization": f"Bearer {token}"}
         
         # Determine mime type (basic)
@@ -340,7 +343,7 @@ def send_whatsapp_document(recipient_id: str, media_id: str, filename: str, phon
     try:
         phone_id = phone_number_id or os.getenv("META_PHONE_NUMBER_ID")
         token = os.getenv("META_ACCESS_TOKEN")
-        url = f"https://graph.facebook.com/v17.0/{phone_id}/messages"
+        url = f"https://graph.facebook.com/v24.0/{phone_id}/messages"
         headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json"
@@ -360,6 +363,40 @@ def send_whatsapp_document(recipient_id: str, media_id: str, filename: str, phon
     except Exception as e:
         logger.error(f"Error sending WhatsApp document: {e}")
         return None
+
+def compress_image(image_path: str, max_size_mb: float = 1.0, quality: int = 85) -> str:
+    """Resizes and compresses an image to fit within a target file size while maintaining legibility"""
+    try:
+        from PIL import Image
+        import os
+        
+        file_size = os.path.getsize(image_path) / (1024 * 1024)
+        if file_size <= max_size_mb:
+            return image_path
+            
+        img = Image.open(image_path)
+        
+        # 1. Resize if too large (e.g. > 2000px width)
+        max_width = 2000
+        if img.width > max_width:
+            ratio = max_width / float(img.width)
+            new_height = int(float(img.height) * float(ratio))
+            img = img.resize((max_width, new_height), Image.Resampling.LANCZOS)
+            
+        # 2. Save with compression
+        compressed_path = image_path.replace(".", "_compressed.")
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+            
+        img.save(compressed_path, "JPEG", quality=quality, optimize=True)
+        
+        new_size = os.path.getsize(compressed_path) / (1024 * 1024)
+        logger.info(f"Compressed image: {file_size:.2f}MB -> {new_size:.2f}MB")
+        
+        return compressed_path
+    except Exception as e:
+        logger.error(f"Error compressing image: {e}")
+        return image_path
 
 def is_valid_gstin(gstin: str) -> bool:
     """Basic Regex validation for Indian GSTIN (15 characters)"""
@@ -397,6 +434,25 @@ def convert_pdf_to_image(pdf_path: str) -> str:
     except Exception as e:
         logger.error(f"Error converting PDF to image: {e}")
     return None
+
+def convert_pdf_to_images(pdf_path: str, max_pages: int = 10) -> list:
+    """Converts multiple pages of a PDF to JPG images for multi-page analysis"""
+    try:
+        images = convert_from_path(
+            pdf_path, 
+            first_page=1, 
+            last_page=max_pages, 
+            poppler_path=POPPLER_PATH
+        )
+        image_paths = []
+        for i, image in enumerate(images):
+            image_path = pdf_path.replace(".pdf", f"_p{i+1}.jpg")
+            image.save(image_path, "JPEG")
+            image_paths.append(image_path)
+        return image_paths
+    except Exception as e:
+        logger.error(f"Error converting PDF to images: {e}")
+    return []
 
 def extract_text_from_pdf(pdf_path: str) -> str:
     """Extracts text content from a PDF file using PyPDF2"""

@@ -35,7 +35,12 @@ import { useUser } from '../context/UserContext';
 
 const RecordTransaction = () => {
   const navigate = useNavigate();
-  const { whatsappId, fetchUserStats } = useUser();
+  const { whatsappId, fetchUserStats, businesses } = useUser();
+  
+  // Get primary business state code for tax calculations
+  const businessStateCode = businesses && businesses.length > 0 
+    ? (businesses[0].business_gstin || '37').substring(0, 2) 
+    : '37';
   
   const [activeCategory, setActiveCategory] = useState('Sale'); // 'Sale', 'Purchase', 'Expense', 'Payment'
   const [entryMethod, setEntryMethod] = useState('manual'); 
@@ -59,9 +64,8 @@ const RecordTransaction = () => {
     reverse_charge: 'N',
     items: [
       { 
-        description: '',
+        hsn_description: '',
         hsn_code: '', 
-        hsn_description: '', 
         uqc: 'PCS', 
         quantity: 1, 
         unit_price: 0, 
@@ -110,10 +114,27 @@ const RecordTransaction = () => {
     setFormData(prev => ({ ...prev, total_amount: total.toFixed(2) }));
   }, [formData.items]);
 
+  // Auto-populate Place of Supply based on GSTIN
+  useEffect(() => {
+    if (formData.party_gstin && formData.party_gstin.length >= 2) {
+      const stateCode = formData.party_gstin.substring(0, 2);
+      // Basic check for numeric state code
+      if (/^\d+$/.test(stateCode)) {
+        // Only update if it's currently empty or has changed significantly (optional logic)
+        setFormData(prev => ({ ...prev, place_of_supply: stateCode }));
+      }
+    }
+  }, [formData.party_gstin]);
+
   const handleItemChange = (index, field, value) => {
     const newItems = [...formData.items];
     const item = { ...newItems[index], [field]: value };
     
+    // Determine if it's Inter-State (IGST) or Intra-State (CGST+SGST)
+    // Place of Supply (POS) 2-digit code vs Business State Code
+    const pos = (formData.place_of_supply || '').substring(0, 2);
+    const isInterState = pos && pos !== businessStateCode;
+
     // Auto-calculate values based on change
     if (field === 'unit_price' || field === 'quantity' || field === 'gst_rate') {
       const qty = parseFloat(item.quantity) || 0;
@@ -124,15 +145,34 @@ const RecordTransaction = () => {
       const totalTax = (lineTaxable * rate) / 100;
       
       item.taxable_value = lineTaxable.toFixed(2);
-      item.cgst = (totalTax / 2).toFixed(2);
-      item.sgst = (totalTax / 2).toFixed(2);
-      item.igst = 0;
+      
+      if (isInterState) {
+        item.igst = totalTax.toFixed(2);
+        item.cgst = 0;
+        item.sgst = 0;
+      } else {
+        item.cgst = (totalTax / 2).toFixed(2);
+        item.sgst = (totalTax / 2).toFixed(2);
+        item.igst = 0;
+      }
+      
       item.total_amount = (lineTaxable + totalTax).toFixed(2);
     } else if (field === 'taxable_value') {
-      // If user edits total taxable value directly, update total_amount
+      // If user edits total taxable value directly, update total_amount and tax split
       const taxableVal = parseFloat(value) || 0;
       const rate = parseFloat(item.gst_rate) || 0;
       const totalTax = (taxableVal * rate) / 100;
+      
+      if (isInterState) {
+        item.igst = totalTax.toFixed(2);
+        item.cgst = 0;
+        item.sgst = 0;
+      } else {
+        item.cgst = (totalTax / 2).toFixed(2);
+        item.sgst = (totalTax / 2).toFixed(2);
+        item.igst = 0;
+      }
+      
       item.total_amount = (taxableVal + totalTax).toFixed(2);
     } else if (field === 'total_amount') {
       // Reverse calculate if total is entered
@@ -140,20 +180,59 @@ const RecordTransaction = () => {
       const rate = parseFloat(item.gst_rate) || 0;
       item.taxable_value = (total / (1 + rate/100)).toFixed(2);
       const totalTax = total - parseFloat(item.taxable_value);
-      item.cgst = (totalTax / 2).toFixed(2);
-      item.sgst = (totalTax / 2).toFixed(2);
-      item.igst = 0;
+      
+      if (isInterState) {
+        item.igst = totalTax.toFixed(2);
+        item.cgst = 0;
+        item.sgst = 0;
+      } else {
+        item.cgst = (totalTax / 2).toFixed(2);
+        item.sgst = (totalTax / 2).toFixed(2);
+        item.igst = 0;
+      }
     }
 
     newItems[index] = item;
     setFormData({ ...formData, items: newItems });
   };
 
+  // Recalculate all items whenever Place of Supply changes
+  useEffect(() => {
+    if (formData.items.length > 0) {
+      const pos = (formData.place_of_supply || '').substring(0, 2);
+      const isInterState = pos && pos !== businessStateCode;
+      
+      const updatedItems = formData.items.map(item => {
+        const taxableVal = parseFloat(item.taxable_value) || 0;
+        const rate = parseFloat(item.gst_rate) || 0;
+        const totalTax = (taxableVal * rate) / 100;
+        
+        const newItem = { ...item };
+        if (isInterState) {
+          newItem.igst = totalTax.toFixed(2);
+          newItem.cgst = 0;
+          newItem.sgst = 0;
+        } else {
+          newItem.cgst = (totalTax / 2).toFixed(2);
+          newItem.sgst = (totalTax / 2).toFixed(2);
+          newItem.igst = 0;
+        }
+        return newItem;
+      });
+      
+      // Check if anything actually changed to avoid infinite loops
+      const hasChanged = JSON.stringify(updatedItems) !== JSON.stringify(formData.items);
+      if (hasChanged) {
+        setFormData(prev => ({ ...prev, items: updatedItems }));
+      }
+    }
+  }, [formData.place_of_supply, businessStateCode]);
+
   const addItem = () => {
     setFormData({
       ...formData,
       items: [...formData.items, { 
-        description: '', hsn_code: '', hsn_description: '', uqc: 'PCS', quantity: 1, 
+        hsn_description: '', hsn_code: '', uqc: 'PCS', quantity: 1, 
         unit_price: 0, gst_rate: 18, taxable_value: 0, cgst: 0, sgst: 0, igst: 0, total_amount: 0 
       }]
     });
@@ -257,9 +336,8 @@ const RecordTransaction = () => {
         const qty = item.quantity || 1;
         const totalTaxable = item.taxable_value || 0;
         return {
-          description: item.description || item.item_name || item.product_description || '',
+          hsn_description: item.hsn_description || item.description || item.item_name || item.product_description || '',
           hsn_code: item.hsn_code || '',
-          hsn_description: item.hsn_description || '',
           uqc: item.uqc || 'PCS',
           quantity: qty,
           unit_price: item.rate || (totalTaxable / qty).toFixed(2),
@@ -319,10 +397,28 @@ const RecordTransaction = () => {
 
   const handleFinalSave = async () => {
     if (!whatsappId) return;
-    if (!formData.party_name || !formData.total_amount) {
-      setError('Please fill Name and Amount');
+    
+    // Comprehensive Validation
+    const errors = [];
+    if (!formData.party_name?.trim()) errors.push(`${activeCategory === 'Sale' ? 'Customer' : 'Supplier'} Name`);
+    if (!formData.invoice_no?.trim()) errors.push('Invoice Number');
+    if (!formData.total_amount || parseFloat(formData.total_amount) <= 0) errors.push('Total Amount (must be > 0)');
+    
+    // Validate items
+    formData.items.forEach((item, idx) => {
+      const rowNum = idx + 1;
+      if (!item.hsn_description?.trim()) errors.push(`Item ${rowNum} HSN Description`);
+      if (!item.quantity || parseFloat(item.quantity) < 1) errors.push(`Item ${rowNum} Quantity (min 1)`);
+      if (!item.unit_price || parseFloat(item.unit_price) <= 0) errors.push(`Item ${rowNum} Unit Price (must be > 0)`);
+    });
+
+    if (errors.length > 0) {
+      setError(`Please fix the following: ${errors.join(', ')}`);
+      // Scroll to top or error view if needed
+      window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
+
     setLoading(true);
     setError(null);
     try {
@@ -360,7 +456,7 @@ const RecordTransaction = () => {
       invoice_no: '',
       place_of_supply: '',
       reverse_charge: 'N',
-      items: [{ description: '', hsn_code: '', hsn_description: '', uqc: 'PCS', quantity: 1, unit_price: 0, gst_rate: 18, taxable_value: 0, cgst: 0, sgst: 0, igst: 0, total_amount: 0 }],
+      items: [{ hsn_description: '', hsn_code: '', uqc: 'PCS', quantity: 1, unit_price: 0, gst_rate: 18, taxable_value: 0, cgst: 0, sgst: 0, igst: 0, total_amount: 0 }],
       total_amount: 0,
       category: '',
       payment_mode: 'Cash',
@@ -519,7 +615,7 @@ const RecordTransaction = () => {
             <table className="w-full min-w-[1000px]">
               <thead>
                 <tr className="border-b border-gray-100">
-                  <th className="pb-6 text-[10px] font-black text-gray-400 uppercase tracking-widest text-left px-4">Description</th>
+                  <th className="pb-6 text-[10px] font-black text-gray-400 uppercase tracking-widest text-left px-4">HSN Description</th>
                   <th className="pb-6 text-[10px] font-black text-gray-400 uppercase tracking-widest text-left px-4 w-32">HSN</th>
                   <th className="pb-6 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right px-4 w-24">Qty</th>
                   <th className="pb-6 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right px-4 w-40">Unit Price</th>
@@ -535,8 +631,8 @@ const RecordTransaction = () => {
                     <td className="py-6 px-4">
                       <input 
                         type="text" 
-                        value={item.description} 
-                        onChange={(e) => handleItemChange(idx, 'description', e.target.value)} 
+                        value={item.hsn_description} 
+                        onChange={(e) => handleItemChange(idx, 'hsn_description', e.target.value)} 
                         placeholder="Item name / service" 
                         className="w-full bg-transparent font-bold outline-none placeholder:text-gray-300 focus:text-blue-600" 
                       />

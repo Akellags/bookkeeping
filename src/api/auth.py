@@ -17,10 +17,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # Google OAuth2 Configuration - Read directly from environment
-GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
-GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
-GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/auth/callback")
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
+GOOGLE_CLIENT_ID = (os.getenv("GOOGLE_CLIENT_ID") or "").strip()
+GOOGLE_CLIENT_SECRET = (os.getenv("GOOGLE_CLIENT_SECRET") or "").strip()
+GOOGLE_REDIRECT_URI = (os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/auth/callback")).strip()
+FRONTEND_URL = (os.getenv("FRONTEND_URL", "http://localhost:5173")).strip().rstrip("/")
 
 SCOPES = ["https://www.googleapis.com/auth/drive.file", "openid", "https://www.googleapis.com/auth/userinfo.email", "https://www.googleapis.com/auth/documents"]
 

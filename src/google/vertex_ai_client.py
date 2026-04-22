@@ -3,14 +3,14 @@ import logging
 import json
 from typing import Optional, Dict
 import vertexai
-from vertexai.generative_models import GenerativeModel, GenerationConfig
+from vertexai.generative_models import GenerativeModel, GenerationConfig, Part
 
 logger = logging.getLogger(__name__)
 
 class GoogleVertexAIClient:
     def __init__(self):
         self.project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
-        self.location = os.getenv("VERTEX_AI_LOCATION", "us-central1")
+        self.location = os.getenv("VERTEX_AI_LOCATION", "asia-south1")
         # Use Gemini 2.5 Flash as the stable production-grade model
         self.model_name = os.getenv("VERTEX_AI_MODEL", "gemini-2.5-flash")
         
@@ -18,7 +18,44 @@ class GoogleVertexAIClient:
         vertexai.init(project=self.project_id, location=self.location)
         self.model = GenerativeModel(self.model_name)
 
-    async def normalize_extraction(self, raw_data: Dict, schema_prompt: str) -> Dict:
+    async def extract_from_media(self, file_path: str, mime_type: str, prompt: str) -> Dict:
+        """Sends a file directly to Gemini for multimodal extraction (Async)."""
+        with open(file_path, "rb") as f:
+            file_data = f.read()
+            
+        part = Part.from_data(data=file_data, mime_type=mime_type)
+        
+        # Use a more reliable set of models based on project availability (Current: 2026)
+        candidate_models = [
+            self.model_name,
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+            "gemini-1.5-flash-002",
+            "gemini-1.5-flash"
+        ]
+        
+        # Remove duplicates while preserving order
+        candidate_models = list(dict.fromkeys(candidate_models))
+        
+        for model_id in candidate_models:
+            try:
+                logger.info(f"Attempting direct extraction with model: {model_id}")
+                temp_model = GenerativeModel(model_id)
+                response = await temp_model.generate_content_async(
+                    [part, prompt],
+                    generation_config=GenerationConfig(
+                        response_mime_type="application/json"
+                    )
+                )
+                return json.loads(response.text)
+            except Exception as e:
+                last_error = e
+                logger.warning(f"Model {model_id} direct extraction failed: {e}")
+                continue
+                
+        raise last_error
+
+    async def normalize_extraction(self, raw_data: Dict, schema_prompt: str, response_mime_type: str = "application/json") -> Dict:
         """Uses Gemini to normalize raw extraction data into the canonical schema (Async)."""
         prompt = f"""
         You are a data normalization expert. Convert the following raw extraction data into a strict JSON format based on the canonical schema.
@@ -32,14 +69,17 @@ class GoogleVertexAIClient:
         Return ONLY the JSON object.
         """
         
-        # List of models to try if the primary fails (latest models based on 2026 docs)
+        # List of models to try if the primary fails (Current: 2026)
         candidate_models = [
             self.model_name,
             "gemini-2.5-flash",
             "gemini-2.5-pro",
-            "gemini-3.1-flash-preview",
+            "gemini-2.0-flash",
             "gemini-1.5-flash-002"
         ]
+        
+        # Remove duplicates while preserving order
+        candidate_models = list(dict.fromkeys(candidate_models))
         
         last_error = None
         for model_id in candidate_models:
@@ -49,10 +89,13 @@ class GoogleVertexAIClient:
                 response = await temp_model.generate_content_async(
                     prompt,
                     generation_config=GenerationConfig(
-                        response_mime_type="application/json"
+                        response_mime_type=response_mime_type
                     )
                 )
-                return json.loads(response.text)
+                
+                if response_mime_type == "application/json":
+                    return json.loads(response.text)
+                return response.text
             except Exception as e:
                 last_error = e
                 logger.warning(f"Model {model_id} failed: {e}")

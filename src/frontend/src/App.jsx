@@ -8,11 +8,19 @@ const getApiBaseUrl = () => {
   const envUrl = import.meta.env.VITE_API_BASE_URL;
   if (envUrl) return envUrl;
   
+  const hostname = window.location.hostname;
+  
+  // Production fallback
+  if (hostname === 'books.helpsu.ai' || hostname === 'www.books.helpsu.ai') {
+    return 'https://bookkeeper-be-486079244466.asia-south1.run.app';
+  }
+  
   // Intelligent fallback for Cloud Run deployments
-  if (window.location.hostname.includes('-fe-')) {
+  if (hostname.includes('-fe-')) {
     return window.location.origin.replace('-fe-', '-be-');
   }
   
+  // Local development default (relative calls if no base URL)
   return '';
 };
 

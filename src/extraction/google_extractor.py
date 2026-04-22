@@ -16,6 +16,7 @@ class GoogleExtractor(BaseExtractor):
         Role: You are a specialist Indian GST Compliance Accountant and expert invoice data extraction system.
         Task: Analyze the raw extraction data from an invoice and normalize it into a strict JSON format.
 
+        Rule: Extract all line items correctly. Handle discounts and schemes carefully.
         Rules:
         1. Intent Detection: 
            - Set "is_transaction" to true if the message describes a sale, purchase, expense, payment (rent, bill, repair), or bill.
@@ -29,8 +30,9 @@ class GoogleExtractor(BaseExtractor):
         4. Descriptions: CRITICAL: Extract the EXACT description of the product/service as printed on the invoice. DO NOT summarize, DO NOT shorten, DO NOT capitalize if it is lowercase. Match the invoice text 1:1.
         5. Tax Split: Calculate or extract CGST, SGST, and IGST for each item. If the state of the supplier matches the recipient, use CGST/SGST. If different, use IGST.
         6. HSN Codes: Extract the 4 or 8-digit HSN code for each item. If missing, suggest the most likely 4-digit code based on the item description.
-        7. Language: Convert any language invoice to English before extracting data.
-        8. Standard Keys: Use snake_case for keys and avoid spaces or special characters.
+        7. Discounts: If an item has a "Discount" or "Scheme Discount" amount, extract it into "discount_amount". The "taxable_value" should be (quantity * rate) - discount_amount.
+        8. Language: Convert any language invoice to English before extracting data.
+        9. Standard Keys: Use snake_case for keys and avoid spaces or special characters.
 
         Required JSON Output Format:
         {
@@ -97,30 +99,66 @@ class GoogleExtractor(BaseExtractor):
         """
 
     async def extract(self, req: ExtractionRequest) -> ExtractionResult:
-        """Runs Document AI extraction then Vertex AI normalization."""
+        """Prioritizes direct Gemini extraction for speed, fallbacks to Document AI."""
+        from src.utils import compress_image
         start_time = time.time()
+        
+        # Optimize image for faster upload and processing
+        media_path = req.media_path
+        is_compressed = False
+        if req.mime_type.startswith("image/"):
+            media_path = compress_image(req.media_path)
+            if media_path != req.media_path:
+                is_compressed = True
+        
         try:
-            # 1. Document AI Extraction (Async call to client)
+            # 1. Primary Path: Direct Gemini Extraction (Vision/Multimodal)
+            try:
+                logger.info(f"Primary Path: Direct Gemini Extraction for user: {req.user_id}")
+                gemini_start = time.time()
+                normalized_data = await self.vertex_ai.extract_from_media(
+                    media_path,
+                    req.mime_type,
+                    self.normalization_prompt
+                )
+                gemini_end = time.time()
+                logger.info(f"Direct Gemini extraction took {gemini_end - gemini_start:.2f} seconds")
+                
+                # Cleanup compressed image
+                if is_compressed and os.path.exists(media_path):
+                    os.remove(media_path)
+                
+                canonical = CanonicalTransaction(**normalized_data)
+                end_time = time.time()
+                logger.info(f"TOTAL Direct Google Extraction took {end_time - start_time:.2f} seconds")
+
+                return ExtractionResult(
+                    extraction_provider="google",
+                    provider_model=f"{self.vertex_ai.model_name} (Direct)",
+                    canonical_data=canonical,
+                    confidence_score=0.95 # Native Gemini confidence placeholder
+                )
+            except Exception as gemini_err:
+                logger.warning(f"Direct Gemini extraction failed, falling back to Document AI: {gemini_err}")
+            
+            # 2. Fallback Path: Document AI + Vertex AI Normalization
             doc_start = time.time()
             document = await self.doc_ai.process_document(req.media_path, req.mime_type)
             doc_end = time.time()
-            logger.info(f"Document AI extraction took {doc_end - doc_start:.2f} seconds")
+            logger.info(f"Document AI fallback extraction took {doc_end - doc_start:.2f} seconds")
             
-            # Convert Document AI entities to a dict for normalization
             raw_data = self._doc_to_dict(document)
             
-            # 2. Vertex AI Normalization
             vertex_start = time.time()
             normalized_data = await self.vertex_ai.normalize_extraction(
                 raw_data, 
                 self.normalization_prompt
             )
             vertex_end = time.time()
-            logger.info(f"Vertex AI normalization took {vertex_end - vertex_start:.2f} seconds")
+            logger.info(f"Vertex AI fallback normalization took {vertex_end - vertex_start:.2f} seconds")
             
             canonical = CanonicalTransaction(**normalized_data)
             
-            # Confidence score (average of Document AI entity confidences)
             total_confidence = sum(entity.confidence for entity in document.entities)
             avg_confidence = total_confidence / len(document.entities) if document.entities else 0.0
             
@@ -129,19 +167,36 @@ class GoogleExtractor(BaseExtractor):
             }
 
             end_time = time.time()
-            logger.info(f"TOTAL Google Extraction took {end_time - start_time:.2f} seconds")
+            logger.info(f"TOTAL Fallback Google Extraction took {end_time - start_time:.2f} seconds")
 
             return ExtractionResult(
                 extraction_provider="google",
-                provider_model="documentai-invoice-parser + gemini-1.5-flash",
+                provider_model="documentai-fallback + gemini-normalization",
                 canonical_data=canonical,
                 confidence_score=avg_confidence,
                 field_confidence=field_confidence
             )
 
         except Exception as e:
-            logger.error(f"Google Extraction failed: {e}")
+            logger.error(f"Google Extraction failed entirely: {e}")
             raise
+
+    async def extract_text(self, text: str) -> dict:
+        """Processes a text message or transcript using Gemini (Async)."""
+        logger.info("Processing text with Gemini")
+        start_time = time.time()
+        try:
+            # We reuse the normalization prompt which is already strict JSON
+            result = await self.vertex_ai.normalize_extraction(
+                {"user_input": text}, 
+                self.normalization_prompt
+            )
+            end_time = time.time()
+            logger.info(f"Gemini text processing took {end_time - start_time:.2f} seconds")
+            return result
+        except Exception as e:
+            logger.error(f"Gemini text processing failed: {e}")
+            return None
 
     def _doc_to_dict(self, document) -> dict:
         """Converts Document AI entities into a simple dictionary."""

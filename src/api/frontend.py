@@ -55,7 +55,7 @@ async def get_user_stats(whatsapp_id: str = Depends(get_current_user), start_dat
         business = db.query(Business).filter(Business.user_whatsapp_id == whatsapp_id).first()
     
     if not business:
-        raise HTTPException(status_code=401, detail="Unauthorized: No business profile found")
+        raise HTTPException(status_code=404, detail="No business profile found")
 
     # 1. Fetch Google Sheets totals
     gs = GoogleService(user.google_refresh_token)
@@ -284,26 +284,9 @@ async def process_image_fe(
         extraction_result = None
         # Process with AI
         if ext in [".jpg", ".jpeg", ".png"] or ext == ".pdf":
-            # For PDFs, convert_pdf_to_image returns an image path if it works
             target_path = temp_path
             mime_type = "image/jpeg" if ext in [".jpg", ".jpeg"] else f"application/{ext[1:]}"
             
-            if ext == ".pdf":
-                image_path = convert_pdf_to_image(temp_path)
-                if image_path:
-                    target_path = image_path
-                    mime_type = "image/jpeg"
-                else:
-                    # Fallback to text extraction if PDF to image fails
-                    pdf_text = extract_text_from_pdf(temp_path)
-                    if pdf_text:
-                        # Create a temp text file for the orchestrator
-                        txt_path = temp_path + ".txt"
-                        with open(txt_path, "w", encoding="utf-8") as f:
-                            f.write(pdf_text)
-                        target_path = txt_path
-                        mime_type = "text/plain"
-
             # Determine provider from user settings (placeholder for now, defaults to openai)
             provider = "openai"
             if os.getenv("DEFAULT_EXTRACTION_PROVIDER") == "google":
@@ -318,13 +301,6 @@ async def process_image_fe(
             )
             extraction_result = await extraction_orchestrator.extract(req)
             
-            # Cleanup temp text file if created
-            if target_path.endswith(".txt") and os.path.exists(target_path):
-                os.remove(target_path)
-            # Cleanup temp image if converted from PDF
-            if ext == ".pdf" and target_path.endswith(".jpg") and os.path.exists(target_path):
-                os.remove(target_path)
-
         if not extraction_result:
             raise HTTPException(status_code=500, detail="AI extraction failed")
         
@@ -503,11 +479,20 @@ async def save_transaction_fe(
         sgst = extraction.get("sgst")
         igst = extraction.get("igst")
         
-        place_of_supply = extraction.get("place_of_supply", business.business_gstin[:2] if business.business_gstin else "37")
-        is_inter_state = False
-        if business.business_gstin and len(business.business_gstin) >= 2 and party_gstin and len(party_gstin) >= 2:
-            is_inter_state = business.business_gstin[:2] != party_gstin[:2]
-
+        # Robust Place of Supply logic
+        place_of_supply = (extraction.get("place_of_supply") or "").strip()
+        if not place_of_supply:
+            # For sales, derive from party (customer) GSTIN. Fallback to business state
+            if party_gstin and len(party_gstin) >= 2:
+                place_of_supply = party_gstin[:2]
+            else:
+                place_of_supply = business.business_gstin[:2] if business.business_gstin else "37"
+        
+        # Calculate Inter-State vs Intra-State based on Place of Supply
+        business_state = (business.business_gstin or "37")[:2]
+        pos_code = get_state_code(place_of_supply)
+        is_inter_state = business_state != pos_code
+        
         if taxable_value is None or taxable_value == 0:
             if gst_rate > 0:
                 taxable_value = total_amount / (1 + (gst_rate / 100))
@@ -572,9 +557,9 @@ async def save_transaction_fe(
                     get_state_code(place_of_supply), # 5: Place Of Supply
                     extraction.get("reverse_charge", "N"), # 6: Reverse Charge
                     "B2B" if party_gstin else "B2CS", # 7: Invoice Type
-                    final_type,              # 8: Transaction Type
+                    extraction.get("transaction_type", final_type), # 8: Transaction Type
                     item.get("hsn_code", ""), # 9: HSN Code
-                    item.get("hsn_description", ""), # 10: HSN Description
+                    item.get("description") or item.get("hsn_description", ""), # 10: HSN Description
                     get_uqc_code(item.get("uqc", "OTH")), # 11: UQC
                     item.get("quantity", 1), # 12: Quantity
                     item.get("gst_rate", 0), # 13: Rate

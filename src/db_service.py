@@ -13,10 +13,10 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 # Cloud SQL Python Connector configuration
-INSTANCE_CONNECTION_NAME = os.getenv("INSTANCE_CONNECTION_NAME")
-DB_USER = os.getenv("DB_USER")
-DB_PASS = os.getenv("DB_PASS")
-DB_NAME = os.getenv("DB_NAME")
+INSTANCE_CONNECTION_NAME = (os.getenv("INSTANCE_CONNECTION_NAME") or "").strip()
+DB_USER = (os.getenv("DB_USER") or "").strip()
+DB_PASS = (os.getenv("DB_PASS") or "").strip()
+DB_NAME = (os.getenv("DB_NAME") or "").strip()
 
 def get_engine():
     # Use Connector if connection details are provided
