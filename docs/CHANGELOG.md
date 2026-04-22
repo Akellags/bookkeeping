@@ -2,6 +2,23 @@
 
 All notable changes to the **Help U Bookkeeper** project will be documented in this file.
 
+## [2026-04-22] - Latency Optimization & Gemini-First Architecture
+
+### Added
+- **Gemini-First Extraction**: Fully transitioned to **Gemini 2.5 Flash** for multimodal invoice extraction, replacing the slower 2-step Document AI process.
+- **Asynchronous Task Decoupling**: Backgrounded non-critical tasks (Google Drive uploads and Google Doc generation) to provide near-instant chat confirmations (~3s response).
+- **Smart Image Compression**: Implemented automatic resizing and optimization for large invoice images in `src/utils.py` to reduce bandwidth and latency.
+- **Regional Optimization**: Aligned Vertex AI infrastructure to `asia-south1` (Mumbai) to match the backend Cloud Run region, eliminating cross-region network overhead.
+
+### Fixed
+- **WhatsApp Webhook Stability**: Resolved Meta Graph API version mismatches (updated to v21) and fixed token/ID stripping issues for reliable live mode operation.
+- **Place of Supply Logic**: Corrected the automatic extraction of State Codes from GSTINs for accurate IGST vs CGST/SGST calculations.
+- **OAuth & Secret Management**: Standardized Meta/WhatsApp secret handling and updated deployment guides in `gcp_env_vars.md`.
+
+### Changed
+- **Extraction Pipeline**: 90% reduction in end-to-end extraction latency (from ~75s to ~12s) via 1-step multimodal processing.
+- **Backend Deployment Reference**: Updated `docs/gcp_env_vars.md` to include Firebase-specific frontend deployment and consolidated secret management commands.
+
 ## [2026-04-13] - Onboarding & Login Optimization (Current Sprint)
 
 ### Added

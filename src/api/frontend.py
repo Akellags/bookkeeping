@@ -546,6 +546,7 @@ async def save_transaction_fe(
             }]
 
             gs = GoogleService(user.google_refresh_token)
+            all_rows = []
             for item in items:
                 # Schema from GoogleService._get_ledger_headers (21 columns)
                 row = [
@@ -571,7 +572,10 @@ async def save_transaction_fe(
                     extraction.get("payment_mode", "Paid"), # 19: Payment Status
                     extraction.get("due_date", "") # 20: Due Date
                 ]
-                await gs.append_to_master_ledger(business.master_ledger_sheet_id, row, sheet_name=final_type)
+                all_rows.append(row)
+            
+            if all_rows:
+                await gs.batch_append_to_master_ledger(business.master_ledger_sheet_id, all_rows, sheet_name=final_type)
         
         if data.media_url and os.path.exists(data.media_url):
             await gs.upload_bill_image(data.media_url, business.drive_folder_id)

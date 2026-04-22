@@ -454,6 +454,7 @@ async def _finalize_transaction(db: Session, user: User, business: Business, tx:
             is_intra_state = (business_state_code == pos_state_code)
 
             last_index = 0
+            all_rows = []
             for item in items:
                 taxable_value = float(item.get("taxable_value", 0))
                 gst_rate = float(item.get("gst_rate", 0))
@@ -476,10 +477,15 @@ async def _finalize_transaction(db: Session, user: User, business: Business, tx:
                     item.get("hsn_description", ""), get_uqc_code(item.get("uqc", "OTH")), item.get("quantity", 1),
                     gst_rate, taxable_value, cgst, sgst, igst, 0, "", ""
                 ]
-                result = await gs.append_to_master_ledger(business.master_ledger_sheet_id, row, sheet_name=sheet_name)
+                all_rows.append(row)
+            
+            if all_rows:
+                result = await gs.batch_append_to_master_ledger(business.master_ledger_sheet_id, all_rows, sheet_name=sheet_name)
                 try:
                     updated_range = result.get("updates", {}).get("updatedRange", "")
+                    # For batch append, we want the index of the last row added
                     last_index = int(''.join(filter(str.isdigit, updated_range.split("!")[-1].split(":")[0])))
+                    row = all_rows[-1] # Use the last row for the payment update logic
                 except:
                     pass
 

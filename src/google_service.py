@@ -299,6 +299,12 @@ class GoogleService:
 
     async def append_to_master_ledger(self, sheet_id: str, row_data: list, sheet_name: str = "Sales"):
         """Appends a new transaction row to the Master Ledger Google Sheet using requests for stability"""
+        return await self.batch_append_to_master_ledger(sheet_id, [row_data], sheet_name=sheet_name)
+
+    async def batch_append_to_master_ledger(self, sheet_id: str, rows_data: list, sheet_name: str = "Sales"):
+        """Appends multiple transaction rows to the Master Ledger in a single request for performance"""
+        if not rows_data: return None
+        
         start_time = time.time()
         resolved_name = await self._resolve_sheet_name(sheet_id, sheet_name)
         resolve_done = time.time()
@@ -306,13 +312,13 @@ class GoogleService:
         range_name = f"'{resolved_name}'!A:U"
         url = f"https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}/values/{range_name}:append"
         params = {"valueInputOption": "USER_ENTERED"}
-        body = {"values": [row_data]}
+        body = {"values": rows_data}
         
         result = await self._execute_with_requests("POST", url, body=body, params=params)
         end_time = time.time()
         
         duration = end_time - start_time
-        logger.info(f"  [TIMER] Google Sheet Append ({sheet_name}): Total {duration:.2f}s (Resolve: {resolve_done - start_time:.2f}s, Append: {end_time - resolve_done:.2f}s)")
+        logger.info(f"  [TIMER] Google Sheet Batch Append ({sheet_name}, {len(rows_data)} rows): Total {duration:.2f}s (Resolve: {resolve_done - start_time:.2f}s, Append: {end_time - resolve_done:.2f}s)")
         
         return result
 
