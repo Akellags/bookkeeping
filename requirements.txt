@@ -24,3 +24,4 @@ python-dotenv
 google-cloud-documentai
 google-cloud-aiplatform
 pytest-asyncio
+firebase-admin

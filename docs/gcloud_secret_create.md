@@ -48,3 +48,15 @@ Remove-Item .\waba_id.txt
 
 curl -X GET "https://graph.facebook.com/v24.0/919339574596127?fields=verified_name,display_phone_number,quality_rating,name_status,whatsapp_business_account" ^
   -H "Authorization: Bearer YOUR_META_ACCESS_TOKEN"
+
+# FASTGST API Key
+:: Create the secret
+gcloud secrets create GST_API_KEY --replication-policy=automatic
+
+# IMP FGST_TEST_1TZZ5SBX86JA6ACH8VCUI3YY is a test key to test the api is working or not
+$api_key = 'FGST_TEST_1TZZ5SBX86JA6ACH8VCUI3YY'
+$api_key.Length
+[System.IO.File]::WriteAllText((Join-Path $PWD "api_key.txt"), $api_key)
+(Get-Item .\api_key.txt).Length
+gcloud secrets versions add GST_API_KEY --data-file=.\api_key.txt
+Remove-Item .\api_key.txt

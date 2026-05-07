@@ -169,10 +169,24 @@ class WhatsAppOrchestrator:
             "How can I help you today? 🚀"
         )
         logger.info(f"Sending high-level menu to {user_whatsapp_id}")
+        
+        # New List Menu items (Meta limit: 24 chars per title)
+        menu_options = [
+            "Sale",
+            "Purchases",
+            "Payments",
+            "Expenses",
+            "Stats: Monthly Total",
+            "Analysis: Deep Report",
+            "Advice: Ask Me",
+            "GSTR1: JSON Report",
+            "Ledger: Full Ledger"
+        ]
+        
         send_whatsapp_interactive(
             user_whatsapp_id, 
             menu_msg, 
-            ["💰 Money In", "💸 Money Out", "🛠️ Business Tools"]
+            menu_options
         )
         return {"status": "main_menu_sent"}
 

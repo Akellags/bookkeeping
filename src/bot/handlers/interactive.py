@@ -51,8 +51,76 @@ async def handle_interactive(db: Session, user: User, business: Business, messag
         if user.last_interaction_type == "AWAITING_PAYMENT":
             return await _handle_payment_status(db, user, business, button_title)
 
-    # 3. Handle Top-Level Buckets (Money In, Money Out, Business Tools)
+    # 3. Handle Top-Level Buckets and New List Menu Items
     btn_clean = button_title.lower().strip()
+    
+    # Check for new list menu items first
+    recording_items = ["sale", "purchases", "payments", "expenses"]
+    tool_items = ["stats:", "analysis:", "advice:", "gstr1:", "ledger:"]
+    
+    if any(x in btn_clean for x in recording_items) or any(x in btn_clean for x in tool_items):
+        # Find or create transaction
+        tx = db.query(Transaction).filter(
+            Transaction.user_whatsapp_id == user_whatsapp_id,
+            Transaction.status.in_(["PENDING_TYPE", "PENDING_SUBTYPE", "PENDING_CONFIRM"])
+        ).order_by(Transaction.created_at.desc()).first()
+
+        if not tx:
+            tx = Transaction(
+                id=str(uuid.uuid4()),
+                user_whatsapp_id=user_whatsapp_id,
+                business_id=business.id,
+                transaction_type="PENDING",
+                status="PENDING_TYPE"
+            )
+            db.add(tx)
+            db.commit()
+
+        # Handle Recording Items
+        if "sale" in btn_clean:
+            return await _handle_type_selection(db, user, business, tx, "Sale")
+        elif "purchases" in btn_clean:
+            return await _handle_type_selection(db, user, business, tx, "Purchase")
+        elif "expenses" in btn_clean:
+            return await _handle_type_selection(db, user, business, tx, "Expense")
+        elif "payments" in btn_clean:
+            # For payments, we need to ask if it's Received or Made
+            tx.transaction_type = "Payment"
+            tx.status = "PENDING_TYPE"
+            db.commit()
+            send_whatsapp_interactive(
+                user.whatsapp_id,
+                "Is this a Payment Received (Money In) or Payment Made (Money Out)?",
+                ["Payment Received", "Payment Made", "Cancel"]
+            )
+            return {"status": "awaiting_payment_direction"}
+
+        # Handle Tool Items (Direct Command Triggering)
+        from src.bot.handlers.commands import (
+            _handle_stats_command, _handle_analysis_command, _handle_gstr1_command
+        )
+        
+        # Cleanup tx as tools don't need a pending transaction
+        tx.status = "CANCELLED"
+        db.commit()
+
+        if "stats:" in btn_clean:
+            return await _handle_stats_command(user, business)
+        elif "analysis:" in btn_clean:
+            return await _handle_analysis_command(user, business)
+        elif "advice:" in btn_clean:
+            send_whatsapp_text(user_whatsapp_id, "I'm ready! Ask me anything about your business performance, GST, or cash flow. (e.g., 'How can I improve my margins?')")
+            user.last_interaction_type = "AWAITING_ADVICE"
+            db.commit()
+            return {"status": "awaiting_advice"}
+        elif "gstr1:" in btn_clean:
+            return await _handle_gstr1_command(user, business)
+        elif "ledger:" in btn_clean:
+            sheet_url = f"https://docs.google.com/spreadsheets/d/{business.master_ledger_sheet_id}"
+            send_whatsapp_text(user.whatsapp_id, f"📖 Your Master Ledger is here: {sheet_url}")
+            return {"status": "ledger_sent"}
+
+    # Legacy support for Top-Level Buckets (Money In, Money Out, Business Tools)
     if any(x in btn_clean for x in ["money in", "money out", "business tools"]):
         tx = db.query(Transaction).filter(
             Transaction.user_whatsapp_id == user_whatsapp_id,
@@ -208,7 +276,24 @@ async def _handle_type_selection(db: Session, user: User, business: Business, tx
             logger.info(f"Setting transaction {tx.id} status to AWAITING_DETAILS for {button_title}")
             tx.status = "AWAITING_DETAILS"
             db.commit()
-            send_whatsapp_text(user.whatsapp_id, f"Great! Please send a photo of the {button_title} bill or type the details (e.g., '{button_title} of 500').")
+            
+            p_label = "Customer" if button_title == "Sale" else "Vendor"
+            example = f"{button_title[0]} | {p_label} | 1000 | 18 | Product Name | [GSTIN]"
+            
+            multi_example = (
+                f"*Complete example:*\n"
+                f"`{button_title[0]} | Sridhar | 36AAACY6329B1ZH | 01-05-2026 | INV-101 | TS`\n"
+                f"`Logitech Keyboard | 2 | 1200 | 18`\n"
+                f"`Logitech Mouse | 5 | 600 | 12`"
+            )
+            
+            msg = (
+                f"Great! Please send a photo of the {button_title} bill or type the details.\n\n"
+                f"💡 *Pro Tip:* Use our 'One-Go' template to save time:\n"
+                f"`{example}`\n\n"
+                f"{multi_example}"
+            )
+            send_whatsapp_text(user.whatsapp_id, msg)
             return {"status": "awaiting_details"}
 
         tx.status = "PENDING_SUBTYPE"
@@ -226,7 +311,15 @@ async def _handle_type_selection(db: Session, user: User, business: Business, tx
         if not tx.extracted_json or "total_amount" not in tx.extracted_json:
             tx.status = "AWAITING_DETAILS"
             db.commit()
-            send_whatsapp_text(user.whatsapp_id, "Great! Please send a photo of the Expense bill or type the details (e.g., 'Paid 500 for rent').")
+            
+            msg = (
+                "Great! Please send a photo of the Expense bill or type the details.\n\n"
+                "💡 *Pro Tip:* Use our 'One-Go' template:\n"
+                "`EXP | Category | Amount | [Notes] | [Date]`\n\n"
+                "*Example:*\n"
+                "`EXP | Rent | 5000 | Office Rent Jan | 01-05-2026`"
+            )
+            send_whatsapp_text(user.whatsapp_id, msg)
             return {"status": "awaiting_details"}
 
         tx.status = "PENDING_CONFIRM"
@@ -243,8 +336,15 @@ async def _handle_type_selection(db: Session, user: User, business: Business, tx
         if not tx.extracted_json or "total_amount" not in tx.extracted_json:
             tx.status = "AWAITING_DETAILS"
             db.commit()
-            prompt = "received from Customer" if button_title == "Payment Received" else "made to Vendor"
-            send_whatsapp_text(user.whatsapp_id, f"Great! Please send the details for this {button_title} (e.g., '{button_title.split()[0]} 1000 {prompt}').")
+            
+            msg = (
+                f"Great! Please send the details for this {button_title}.\n\n"
+                "💡 *Pro Tip:* Use our 'One-Go' template:\n"
+                "`PMT | Party | Amount | Mode | [In/Out] | [Ref #] | [Date]`\n\n"
+                "*Example:*\n"
+                "`PMT | Sridhar | 25000 | UPI | Out | TXN12345 | 01-05-2026`"
+            )
+            send_whatsapp_text(user.whatsapp_id, msg)
             return {"status": "awaiting_details"}
 
         tx.status = "PENDING_SUBTYPE"
@@ -348,11 +448,45 @@ async def _handle_confirmation(db: Session, user: User, business: Business, tx: 
         # Initial request for confirmation
         amount = extraction.get("total_amount", 0)
         is_b2b_selected = extraction.get("is_b2b", False)
+        items = extraction.get("items", [])
         
         display_type = final_type
         if final_type == "Payment":
             p_dir = extraction.get("payment_direction", "N/A")
             display_type = f"Payment {'Received' if p_dir == 'In' else 'Made'}"
+
+        # Custom summary for Template-based entries
+        if button_title == "Template":
+            party = extraction.get("recipient_name") or extraction.get("vendor_name") or "Cash/General"
+            date = extraction.get("date", "N/A")
+            gstin = extraction.get("recipient_gstin") or extraction.get("vendor_gstin")
+            
+            msg = f"📝 *Template Parsed Successfully!*\n\n"
+            msg += f"🔹 *Type*: {display_type}\n"
+            msg += f"👤 *Party*: {party}\n"
+            if gstin:
+                msg += f"🆔 *GSTIN*: {gstin}\n"
+            msg += f"📅 *Date*: {date}\n"
+            if extraction.get('invoice_no'):
+                msg += f"📄 *Inv #*: {extraction.get('invoice_no')}\n"
+            
+            if len(items) > 1:
+                msg += f"\n📦 *Items ({len(items)}):*\n"
+                for i, item in enumerate(items, 1):
+                    msg += f"{i}. {item.get('hsn_description')} (₹{item.get('taxable_value')} + {item.get('gst_rate')}%) = ₹{item.get('total_amount')}\n"
+            elif len(items) == 1:
+                item = items[0]
+                msg += f"📦 *Item*: {item.get('hsn_description')}\n"
+                msg += f"💰 *Calculation*: ₹{item.get('taxable_value')} + {item.get('gst_rate')}% GST\n"
+            
+            msg += f"\n✅ *Grand Total: ₹{amount:,.2f}*"
+            
+            send_whatsapp_interactive(
+                user.whatsapp_id,
+                msg,
+                ["Confirm", "Cancel"]
+            )
+            return {"status": "awaiting_confirmation"}
 
         gstin = extraction.get("recipient_gstin") if final_type == "Sale" else extraction.get("vendor_gstin")
         
@@ -407,6 +541,10 @@ async def _finalize_transaction(db: Session, user: User, business: Business, tx:
             p_type = extraction.get("payment_type", "Single")
             p_freq = extraction.get("payment_frequency", "N/A")
             p_dir = extraction.get("payment_direction", "N/A")
+            
+            # Use recipient_name or customer_name for Sales/Money In, vendor_name for Purchases/Money Out
+            party_name = extraction.get("vendor_name") or extraction.get("recipient_name") or extraction.get("customer_name") or "Vendor/Entity"
+            
             next_due = "N/A"
             if p_type == "Recurring":
                 from dateutil.relativedelta import relativedelta
@@ -417,7 +555,7 @@ async def _finalize_transaction(db: Session, user: User, business: Business, tx:
                     next_due = (curr_dt + relativedelta(years=1)).strftime("%d-%m-%Y")
 
             row = [
-                extraction.get("vendor_name" if final_type == "Purchase" else "customer_name", "Vendor/Entity"),
+                party_name,
                 extraction.get("total_amount", 0), p_type, p_freq, extracted_date, next_due, "Completed",
                 f"Direction: {p_dir} | Recorded via WhatsApp {datetime.now().strftime('%Y-%m-%d')}"
             ]
@@ -470,10 +608,18 @@ async def _finalize_transaction(db: Session, user: User, business: Business, tx:
                 else:
                     igst = round((taxable_value * gst_rate / 100), 2)
 
+                # Determine Party Name: recipient_name for Sale, vendor_name for Purchase/Expense
+                if final_type == "Sale":
+                    p_name = extraction.get("recipient_name") or extraction.get("customer_name") or "B2C Customer"
+                else:
+                    p_name = extraction.get("vendor_name") or extraction.get("customer_name") or "Vendor"
+
                 row = [
-                    extraction.get("recipient_gstin", ""), extraction.get("vendor_name" if final_type == "Purchase" else "customer_name", "B2C Customer"),
+                    extraction.get("recipient_gstin" if final_type == "Sale" else "vendor_gstin", ""), 
+                    p_name,
                     invoice_no, extracted_date, round(item_total, 2), pos_state_code, extraction.get("reverse_charge", "N"),
-                    "B2B" if extraction.get("recipient_gstin") else "B2CS", final_type, item.get("hsn_code", ""),
+                    "B2B" if (extraction.get("recipient_gstin") or extraction.get("vendor_gstin")) else "B2CS", 
+                    final_type, item.get("hsn_code", ""),
                     item.get("hsn_description", ""), get_uqc_code(item.get("uqc", "OTH")), item.get("quantity", 1),
                     gst_rate, taxable_value, cgst, sgst, igst, 0, "", ""
                 ]

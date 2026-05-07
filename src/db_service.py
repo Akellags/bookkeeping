@@ -1,115 +1,133 @@
 import os
 import logging
+
+# Configure basic logging immediately so module-level logs are captured
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 from sqlalchemy import create_engine, Column, String, Text, DateTime, JSON, ForeignKey, Boolean
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
 from dotenv import load_dotenv
-from google.cloud.sql.connector import Connector, IPTypes
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# Cloud SQL Python Connector configuration
-INSTANCE_CONNECTION_NAME = (os.getenv("INSTANCE_CONNECTION_NAME") or "").strip()
-DB_USER = (os.getenv("DB_USER") or "").strip()
-DB_PASS = (os.getenv("DB_PASS") or "").strip()
-DB_NAME = (os.getenv("DB_NAME") or "").strip()
+DB_BACKEND = os.getenv("DB_BACKEND", "SQL").upper()
 
-def get_engine():
-    # Use Connector if connection details are provided
-    if INSTANCE_CONNECTION_NAME and DB_USER and DB_PASS:
-        logger.info(f"Connecting to Cloud SQL via Python Connector: {INSTANCE_CONNECTION_NAME}")
+if DB_BACKEND == "FIREBASE":
+    from src.firestore_service import User, Business, Transaction, ProcessedMessage, FirestoreSession
+    SessionLocal = FirestoreSession
+    engine = None
+    Base = None
+    logger.info("Using FIREBASE as database backend")
+else:
+    # Cloud SQL Python Connector configuration
+    INSTANCE_CONNECTION_NAME = (os.getenv("INSTANCE_CONNECTION_NAME") or "").strip()
+    DB_USER = (os.getenv("DB_USER") or "").strip()
+    DB_PASS = (os.getenv("DB_PASS") or "").strip()
+    DB_NAME = (os.getenv("DB_NAME") or "").strip()
+
+    def get_engine():
+        # Use Connector if connection details are provided
+        if INSTANCE_CONNECTION_NAME and DB_USER and DB_PASS:
+            logger.info(f"Connecting to Cloud SQL via Python Connector: {INSTANCE_CONNECTION_NAME}")
+            
+            # This will use GOOGLE_APPLICATION_CREDENTIALS env var if set, 
+            # or fall back to ADC (gcloud auth application-default login)
+            try:
+                from google.cloud.sql.connector import Connector, IPTypes
+                connector = Connector()
+                
+                def getconn():
+                    conn = connector.connect(
+                        INSTANCE_CONNECTION_NAME,
+                        "pg8000",
+                        user=DB_USER,
+                        password=DB_PASS,
+                        db=DB_NAME,
+                        ip_type=IPTypes.PUBLIC  # Use PUBLIC for local dev without private networking
+                    )
+                    return conn
+
+                return create_engine(
+                    "postgresql+pg8000://",
+                    creator=getconn,
+                )
+            except ImportError:
+                logger.error("google-cloud-sql-connector not installed. Cannot connect to Cloud SQL.")
+                raise
+
+        else:
+            # Fallback to local SQLite or standard DATABASE_URL
+            db_url = os.getenv("DATABASE_URL", "sqlite:///./help_u_bookkeeper.db")
+            logger.info(f"Connecting to database via URL: {db_url}")
+            return create_engine(db_url)
+
+    engine = get_engine()
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    Base = declarative_base()
+
+    class User(Base):
+        __tablename__ = "users"
+        whatsapp_id = Column(String, primary_key=True, index=True)
+        google_email = Column(String, unique=True, index=True)
+        google_refresh_token = Column(Text)
+        active_business_id = Column(String, nullable=True) # ID of current selected business
+        drive_initialized = Column(Boolean, default=False) # True if Google Drive structure is correct
+        subscription_status = Column(String, default="FREE_TRIAL")
+        created_at = Column(DateTime, default=datetime.utcnow)
         
-        # This will use GOOGLE_APPLICATION_CREDENTIALS env var if set, 
-        # or fall back to ADC (gcloud auth application-default login)
-        connector = Connector()
+        # State tracking for WhatsApp commands (e.g., AWAITING_EDIT)
+        last_interaction_type = Column(String, nullable=True)
+        last_interaction_data = Column(JSON, nullable=True)
+
+        # Verification Handover for web-onboarded users
+        link_token = Column(String, unique=True, index=True, nullable=True)
+        link_token_expires_at = Column(DateTime, nullable=True)
         
-        def getconn():
-            conn = connector.connect(
-                INSTANCE_CONNECTION_NAME,
-                "pg8000",
-                user=DB_USER,
-                password=DB_PASS,
-                db=DB_NAME,
-                ip_type=IPTypes.PUBLIC  # Use PUBLIC for local dev without private networking
-            )
-            return conn
+        businesses = relationship("Business", back_populates="user")
 
-        return create_engine(
-            "postgresql+pg8000://",
-            creator=getconn,
-        )
-    else:
-        # Fallback to local SQLite or standard DATABASE_URL
-        db_url = os.getenv("DATABASE_URL", "sqlite:///./help_u_bookkeeper.db")
-        logger.info(f"Connecting to database via URL: {db_url}")
-        return create_engine(db_url)
+    class Business(Base):
+        __tablename__ = "businesses"
+        id = Column(String, primary_key=True, index=True)
+        user_whatsapp_id = Column(String, ForeignKey("users.whatsapp_id"))
+        business_name = Column(String, nullable=False) # Mandatory
+        business_gstin = Column(String, nullable=True) # Optional but no default
+        drive_folder_id = Column(String)
+        master_ledger_sheet_id = Column(String)
+        invoice_template_id = Column(String)
+        is_active = Column(Boolean, default=True)
+        created_at = Column(DateTime, default=datetime.utcnow)
+        
+        user = relationship("User", back_populates="businesses")
 
-engine = get_engine()
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
+    class Transaction(Base):
+        __tablename__ = "transactions"
+        id = Column(String, primary_key=True, index=True)
+        user_whatsapp_id = Column(String, ForeignKey("users.whatsapp_id"))
+        business_id = Column(String, ForeignKey("businesses.id"), nullable=True)
+        transaction_type = Column(String)
+        media_url = Column(Text)
+        extracted_json = Column(JSON)
+        status = Column(String)
+        
+        # Extraction Metadata
+        extraction_provider = Column(String, default="openai")
+        provider_model = Column(String)
+        confidence_score = Column(JSONB) # Can store float or detailed dict
+        field_confidence = Column(JSONB)
+        needs_review = Column(Boolean, default=False)
+        review_reason = Column(String)
+        
+        created_at = Column(DateTime, default=datetime.utcnow)
 
-class User(Base):
-    __tablename__ = "users"
-    whatsapp_id = Column(String, primary_key=True, index=True)
-    google_email = Column(String, unique=True, index=True)
-    google_refresh_token = Column(Text)
-    active_business_id = Column(String, nullable=True) # ID of current selected business
-    drive_initialized = Column(Boolean, default=False) # True if Google Drive structure is correct
-    subscription_status = Column(String, default="FREE_TRIAL")
-    created_at = Column(DateTime, default=datetime.utcnow)
-    
-    # State tracking for WhatsApp commands (e.g., AWAITING_EDIT)
-    last_interaction_type = Column(String, nullable=True)
-    last_interaction_data = Column(JSON, nullable=True)
-
-    # Verification Handover for web-onboarded users
-    link_token = Column(String, unique=True, index=True, nullable=True)
-    link_token_expires_at = Column(DateTime, nullable=True)
-    
-    businesses = relationship("Business", back_populates="user")
-
-class Business(Base):
-    __tablename__ = "businesses"
-    id = Column(String, primary_key=True, index=True)
-    user_whatsapp_id = Column(String, ForeignKey("users.whatsapp_id"))
-    business_name = Column(String, nullable=False) # Mandatory
-    business_gstin = Column(String, nullable=True) # Optional but no default
-    drive_folder_id = Column(String)
-    master_ledger_sheet_id = Column(String)
-    invoice_template_id = Column(String)
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    
-    user = relationship("User", back_populates="businesses")
-
-class Transaction(Base):
-    __tablename__ = "transactions"
-    id = Column(String, primary_key=True, index=True)
-    user_whatsapp_id = Column(String, ForeignKey("users.whatsapp_id"))
-    business_id = Column(String, ForeignKey("businesses.id"), nullable=True)
-    transaction_type = Column(String)
-    media_url = Column(Text)
-    extracted_json = Column(JSON)
-    status = Column(String)
-    
-    # Extraction Metadata
-    extraction_provider = Column(String, default="openai")
-    provider_model = Column(String)
-    confidence_score = Column(JSONB) # Can store float or detailed dict
-    field_confidence = Column(JSONB)
-    needs_review = Column(Boolean, default=False)
-    review_reason = Column(String)
-    
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-class ProcessedMessage(Base):
-    __tablename__ = "processed_messages"
-    message_id = Column(String, primary_key=True, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    class ProcessedMessage(Base):
+        __tablename__ = "processed_messages"
+        message_id = Column(String, primary_key=True, index=True)
+        created_at = Column(DateTime, default=datetime.utcnow)
 
 # Tables should be created via Alembic migrations in production.
 # For local SQLite development, you can still call Base.metadata.create_all(bind=engine) 

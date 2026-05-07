@@ -12,6 +12,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from googleapiclient.errors import HttpError
+from datetime import datetime
 from dotenv import load_dotenv
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 
@@ -44,6 +45,7 @@ google_retry = retry(
 
 class GoogleService:
     _sheet_cache = {} # Class-level cache to persist across instances
+    _CACHE_LIMIT = 1000
 
     def __init__(self, refresh_token: str):
         # Initialize Google API clients with user's refresh token
@@ -117,6 +119,20 @@ class GoogleService:
             "Last Payment Date", "Next Due Date", "Status", "Notes"
         ]
 
+    def _get_product_master_headers(self):
+        """Returns headers for the Product Master worksheet"""
+        return [
+            "Shortcode", "Description", "HSN Code", "GST Rate", "UQC", "Default Unit Price", "Last Updated"
+        ]
+
+    def _add_to_cache(self, key, value):
+        if len(self._sheet_cache) >= self._CACHE_LIMIT:
+            # Simple eviction: clear oldest entries if limit reached
+            keys_to_remove = list(self._sheet_cache.keys())[:100]
+            for k in keys_to_remove:
+                self._sheet_cache.pop(k, None)
+        self._sheet_cache[key] = value
+
     async def _resolve_sheet_name(self, spreadsheet_id: str, target_name: str):
         """Resolves target_name to the actual sheet name in the spreadsheet (e.g. Sales vs Sale)"""
         cache_key = f"{spreadsheet_id}_{target_name}"
@@ -136,12 +152,12 @@ class GoogleService:
             # Cache ALL sheets for this spreadsheet
             for s in sheets:
                 s_norm = s.strip().lower()
-                self._sheet_cache[f"{spreadsheet_id}_{s}"] = s
+                self._add_to_cache(f"{spreadsheet_id}_{s}", s)
                 
-                for t in ["Sales", "Purchases", "Expenses", "Payments"]:
+                for t in ["Sales", "Purchases", "Expenses", "Payments", "Product Master"]:
                     t_norm = t.lower()
-                    if s_norm == t_norm or s_norm == t_norm[:-1] or s_norm == t_norm + "s":
-                         self._sheet_cache[f"{spreadsheet_id}_{t}"] = s
+                    if s_norm == t_norm or s_norm == t_norm[:-1] or s_norm == t_norm + "s" or s_norm == t_norm.replace(" ", "_"):
+                         self._add_to_cache(f"{spreadsheet_id}_{t}", s)
 
             if cache_key in self._sheet_cache:
                 return self._sheet_cache[cache_key]
@@ -150,11 +166,11 @@ class GoogleService:
             for s in sheets:
                 s_norm = s.strip().lower()
                 if s_norm == target_norm or s_norm == target_norm[:-1] or s_norm == target_norm + "s":
-                    self._sheet_cache[cache_key] = s
+                    self._add_to_cache(cache_key, s)
                     return s
 
             if target_name in ["Sales", "Purchases", "Expenses"] and "Sheet1" in sheets:
-                self._sheet_cache[cache_key] = "Sheet1"
+                self._add_to_cache(cache_key, "Sheet1")
                 return "Sheet1"
 
         except Exception as e:
@@ -211,7 +227,7 @@ class GoogleService:
                     existing_sheets = ["Sales" if s == "Sheet1" else s for s in existing_sheets]
                 
                 # Add missing sheets
-                required_sheets = ["Sales", "Purchases", "Expenses", "Payments"]
+                required_sheets = ["Sales", "Purchases", "Expenses", "Payments", "Product Master"]
                 update_url = f"https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}:batchUpdate"
                 for s_name in required_sheets:
                     if s_name not in existing_sheets:
@@ -219,19 +235,36 @@ class GoogleService:
                             "requests": [{"addSheet": {"properties": {"title": s_name}}}]
                         }
                         await self._execute_with_requests("POST", update_url, body=batch_update_request)
-                        headers = self._get_payment_headers() if s_name == "Payments" else self._get_ledger_headers()
+                        
+                        if s_name == "Payments":
+                            headers = self._get_payment_headers()
+                        elif s_name == "Product Master":
+                            headers = self._get_product_master_headers()
+                        else:
+                            headers = self._get_ledger_headers()
+                            
                         await self.append_to_master_ledger(sheet_id, headers, sheet_name=s_name)
                 
                 # Header Repair
-                for s_name in ["Sales", "Purchases", "Expenses"]:
+                sheet_header_map = {
+                    "Sales": self._get_ledger_headers(),
+                    "Purchases": self._get_ledger_headers(),
+                    "Expenses": self._get_ledger_headers(),
+                    "Payments": self._get_payment_headers(),
+                    "Product Master": self._get_product_master_headers()
+                }
+                
+                for s_name, target_headers in sheet_header_map.items():
                     resolved_s_name = await self._resolve_sheet_name(sheet_id, s_name)
-                    val_url = f"https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}/values/'{resolved_s_name}'!A1:U1"
+                    # Fetch first row (max 21 columns for Ledger)
+                    range_end = "U" if s_name in ["Sales", "Purchases", "Expenses"] else "H"
+                    val_url = f"https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}/values/'{resolved_s_name}'!A1:{range_end}1"
                     val_result = await self._execute_with_requests("GET", val_url)
                     current_headers = val_result.get("values", [[]])[0] if val_result else []
                     
-                    target_headers = self._get_ledger_headers()
                     if len(current_headers) < len(target_headers):
-                        update_val_url = f"https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}/values/'{resolved_s_name}'!A1:U1"
+                        logger.info(f"Repairing headers for sheet '{resolved_s_name}'")
+                        update_val_url = f"https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}/values/'{resolved_s_name}'!A1:{range_end}1"
                         params = {"valueInputOption": "USER_ENTERED"}
                         body = {"values": [target_headers]}
                         await self._execute_with_requests("PUT", update_val_url, body=body, params=params)
@@ -254,7 +287,8 @@ class GoogleService:
                     {"updateSheetProperties": {"properties": {"sheetId": first_sheet_id, "title": "Sales"}, "fields": "title"}},
                     {"addSheet": {"properties": {"title": "Purchases"}}},
                     {"addSheet": {"properties": {"title": "Expenses"}}},
-                    {"addSheet": {"properties": {"title": "Payments"}}}
+                    {"addSheet": {"properties": {"title": "Payments"}}},
+                    {"addSheet": {"properties": {"title": "Product Master"}}}
                 ]
             }
             update_url = f"https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}:batchUpdate"
@@ -262,9 +296,11 @@ class GoogleService:
             
             headers = self._get_ledger_headers()
             pay_headers = self._get_payment_headers()
+            prod_headers = self._get_product_master_headers()
             for s_name in ["Sales", "Purchases", "Expenses"]:
                 await self.append_to_master_ledger(sheet_id, headers, sheet_name=s_name)
             await self.append_to_master_ledger(sheet_id, pay_headers, sheet_name="Payments")
+            await self.append_to_master_ledger(sheet_id, prod_headers, sheet_name="Product Master")
 
         # 3. Invoice Template setup
         q = f"name = 'Invoice_Template' and parents in '{folder_id}' and trashed = false"
@@ -362,12 +398,16 @@ class GoogleService:
 
         data_rows = rows[1:]
         b2b_invoices = []
-        b2cs_invoices = []
+        b2cl_invoices = [] # B2C Large
+        b2cs_invoices = [] # B2C Small
         hsn_data = []
         
         min_inv = None
         max_inv = None
         unique_invoices = set()
+
+        # For HSN indexing [Rate][Seq]
+        hsn_counters = {} 
         
         for row in data_rows:
             if len(row) < 15: continue
@@ -388,12 +428,19 @@ class GoogleService:
             if not max_inv or inv_no > max_inv: max_inv = inv_no
 
             inv_type = row[7]
+            inv_val = round(float(row[4] or 0), 2)
             pos = str(row[5]).strip()
             if pos.isdigit() and len(pos) == 1: pos = f"0{pos}"
             elif not pos: pos = "37"
 
+            # Determine Supply Type
+            is_inter = float(row[17] or 0) > 0
+            sply_ty = "INTER" if is_inter else "INTRA"
+
             if inv_type == "B2B":
                 recipient_gstin = str(row[0]).strip().upper()
+                if not recipient_gstin or recipient_gstin == "N/A": continue # Skip invalid B2B
+
                 item_detail = {
                     "num": 1,
                     "itm_det": {
@@ -415,18 +462,37 @@ class GoogleService:
                 if invoice:
                     item_detail["num"] = len(invoice["itms"]) + 1
                     invoice["itms"].append(item_detail)
-                    # Accumulate Total Invoice Value (Sum of line totals)
                     invoice["val"] = round(invoice["val"] + float(row[4] or 0), 2)
                 else:
                     invoice = {
-                        "inum": inv_no, "idt": row[3], "val": round(float(row[4] or 0), 2),
-                        "pos": pos, "rchrg": row[6] or "N", "itms": [item_detail]
+                        "inum": inv_no, "idt": row[3], "val": inv_val,
+                        "pos": pos, "rchrg": row[6] or "N", 
+                        "inv_typ": "R", # Default to Regular
+                        "itms": [item_detail]
                     }
                     vendor["inv"].append(invoice)
-            else:
-                rt = float(row[13] or 0)
-                sply_ty = "INTER" if float(row[17] or 0) > 0 else "INTRA"
+            
+            elif is_inter and inv_val > 250000:
+                # B2C Large Logic
+                item_detail = {
+                    "num": 1,
+                    "itm_det": {
+                        "rt": float(row[13] or 0),
+                        "txval": round(float(row[14] or 0), 2),
+                        "iamt": round(float(row[17] or 0), 2),
+                        "csamt": round(float(row[18] or 0), 2)
+                    }
+                }
                 
+                # B2CL is grouped by invoice, not aggregated like B2CS
+                b2cl_invoices.append({
+                    "inum": inv_no, "idt": row[3], "val": inv_val,
+                    "pos": pos, "itms": [item_detail]
+                })
+            
+            else:
+                # B2C Small
+                rt = float(row[13] or 0)
                 found_b2cs = False
                 for b in b2cs_invoices:
                     if b["pos"] == pos and b["rt"] == rt:
@@ -446,8 +512,11 @@ class GoogleService:
                         "csamt": round(float(row[18] or 0), 2)
                     })
 
+            # HSN Data Aggregation
             hsn_code = str(row[9]).strip() or "OTH"
             uqc_code = str(row[11]).strip().upper() or "OTH"
+            rt = int(float(row[13] or 0))
+            
             found_hsn = False
             for h in hsn_data:
                 if h["hsn_sc"] == hsn_code and h["uqc"] == uqc_code:
@@ -460,9 +529,14 @@ class GoogleService:
                     h["csamt"] = round(h["csamt"] + float(row[18] or 0), 2)
                     found_hsn = True
                     break
+            
             if not found_hsn:
+                # Generate standard Num: [Rate][Sequence]
+                hsn_counters[rt] = hsn_counters.get(rt, 0) + 1
+                hsn_num = int(f"{rt:02d}{hsn_counters[rt]:02d}")
+                
                 hsn_data.append({
-                    "num": len(hsn_data) + 1, "hsn_sc": hsn_code, "desc": str(row[10] or "Goods/Services")[:30],
+                    "num": hsn_num, "hsn_sc": hsn_code, "desc": str(row[10] or "Goods/Services")[:30],
                     "uqc": uqc_code, "qty": round(float(row[12] or 1), 2), "val": round(float(row[4] or 0), 2),
                     "txval": round(float(row[14] or 0), 2), "iamt": round(float(row[17] or 0), 2),
                     "camt": round(float(row[15] or 0), 2), "samt": round(float(row[16] or 0), 2),
@@ -471,9 +545,28 @@ class GoogleService:
 
         total_docs = len(unique_invoices)
         return {
-            "gstin": gstin, "fp": fp, "gt": 0.00, "cur_gt": 0.00,
-            "b2b": b2b_invoices, "b2cs": b2cs_invoices, "hsn": {"data": hsn_data},
-            "doc_issue": {"doc_det": [{"doc_num": 1, "docs": [{"from": min_inv or "N/A", "to": max_inv or "N/A", "totcnt": total_docs, "cancel": 0, "net_issue": total_docs}]}]}
+            "gstin": gstin, 
+            "fp": fp, 
+            "version": "GST3.2.4", # Official tool version
+            "hash": "hash",        # Placeholder hash
+            "gt": 0.00, 
+            "cur_gt": 0.00,
+            "b2b": b2b_invoices, 
+            "b2cl": b2cl_invoices,
+            "b2cs": b2cs_invoices, 
+            "hsn": {"data": hsn_data},
+            "doc_issue": {
+                "doc_det": [{
+                    "doc_num": 1, 
+                    "docs": [{
+                        "from": min_inv or "N/A", 
+                        "to": max_inv or "N/A", 
+                        "totcnt": total_docs, 
+                        "cancel": 0, 
+                        "net_issue": total_docs
+                    }]
+                }]
+            }
         }
 
     async def generate_invoice_pdf_buffer(self, sheet_id: str, invoice_no: str, user_profile: dict = None):
@@ -622,6 +715,68 @@ class GoogleService:
         except Exception as e:
             logger.error(f"Error fetching ledger rows: {e}")
             return []
+
+    async def get_product_master(self, sheet_id: str):
+        """Fetches and caches the Product Master data as a dictionary keyed by Shortcode"""
+        try:
+            rows = await self.get_ledger_rows(sheet_id, sheet_name="Product Master")
+            if not rows or len(rows) <= 1:
+                return {}
+            
+            # Headers: Shortcode, Description, HSN Code, GST Rate, UQC, Default Unit Price, Last Updated
+            master = {}
+            for row in rows[1:]:
+                if len(row) < 1: continue
+                shortcode = str(row[0]).strip().upper()
+                if not shortcode: continue
+                
+                master[shortcode] = {
+                    "description": row[1] if len(row) > 1 else "Unknown",
+                    "hsn_code": row[2] if len(row) > 2 else "OTH",
+                    "gst_rate": float(row[3] or 0) if len(row) > 3 else 0,
+                    "uqc": row[4] if len(row) > 4 else "PCS",
+                    "unit_price": float(row[5] or 0) if len(row) > 5 else 0,
+                    "last_updated": row[6] if len(row) > 6 else ""
+                }
+            return master
+        except Exception as e:
+            logger.error(f"Error fetching product master: {e}")
+            return {}
+
+    async def bulk_update_product_master(self, sheet_id: str, products: list):
+        """
+        Overwrites the Product Master sheet with a new set of products.
+        Expects a list of dictionaries with matching keys.
+        """
+        if not products: return None
+        
+        headers = self._get_product_master_headers()
+        rows = [headers]
+        now = datetime.now().strftime("%d-%m-%Y %H:%M")
+        
+        for p in products:
+            rows.append([
+                str(p.get("shortcode", "")).strip().upper(),
+                p.get("description", ""),
+                p.get("hsn_code", "OTH"),
+                p.get("gst_rate", 0),
+                p.get("uqc", "PCS"),
+                p.get("unit_price", 0),
+                p.get("last_updated") or now
+            ])
+            
+        resolved_name = await self._resolve_sheet_name(sheet_id, "Product Master")
+        
+        # 1. Clear existing data
+        clear_url = f"https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}/values/'{resolved_name}'!A:G:clear"
+        await self._execute_with_requests("POST", clear_url)
+        
+        # 2. Write new data
+        update_url = f"https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}/values/'{resolved_name}'!A1"
+        params = {"valueInputOption": "USER_ENTERED"}
+        body = {"values": rows}
+        
+        return await self._execute_with_requests("PUT", update_url, body=body, params=params)
 
     async def get_ledger_stats(self, sheet_id: str, start_date: str = None, end_date: str = None):
         """Fetches and aggregates stats from Sales, Purchases, Expenses, and Payments sheets"""

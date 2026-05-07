@@ -93,7 +93,7 @@ async def handle_media(db: Session, user: User, business: Business, message_data
             send_whatsapp_interactive(
                 user_whatsapp_id, 
                 f"I've received your image for {business.business_name}! 📸 Which category does this belong to?",
-                ["💰 Money In", "💸 Money Out", "Cancel"]
+                ["Sale", "Purchases", "Payments", "Expenses"]
             )
             return {"status": "awaiting_type_bucket"}
         else:

@@ -7,7 +7,8 @@ import {
   Building,
   ChevronDown,
   Plus,
-  ArrowLeft
+  ArrowLeft,
+  Box
 } from 'lucide-react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import axios from 'axios';
@@ -59,6 +60,7 @@ const Layout = ({ children }) => {
 
   const navItems = [
     { name: 'Dashboard', icon: <LayoutDashboard size={20} />, path: '/dashboard' },
+    { name: 'Inventory', icon: <Box size={20} />, path: '/inventory' },
     { name: 'GST Reports', icon: <FileText size={20} />, path: '/reports' },
     { name: 'Settings', icon: <Settings size={20} />, path: '/settings' },
   ];

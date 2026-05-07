@@ -6,7 +6,7 @@ import shutil
 import base64
 import secrets
 from datetime import datetime, timedelta
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 from fastapi import APIRouter, Request, HTTPException, Query, Depends, File, UploadFile, Body
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -17,6 +17,7 @@ from src.db_service import get_db, User, Business, Transaction, SessionLocal
 from src.extraction.orchestrator import ExtractionOrchestrator
 from src.extraction.schemas import ExtractionRequest
 from src.google_service import GoogleService
+from src.gst_service import GSTLookupService
 from src.utils import (
     get_state_code, get_uqc_code, upload_whatsapp_media, 
     extract_text_from_pdf, convert_pdf_to_image, get_current_user
@@ -40,6 +41,17 @@ class OnboardingSetup(BaseModel):
 class TransactionSave(BaseModel):
     extraction: Dict
     media_url: Optional[str] = None
+
+class ProductItem(BaseModel):
+    shortcode: str
+    description: str
+    hsn_code: str
+    gst_rate: float
+    uqc: Optional[str] = "PCS"
+    unit_price: Optional[float] = 0
+
+class ProductMasterBulk(BaseModel):
+    products: List[ProductItem]
 
 @router.get("/user/stats")
 async def get_user_stats(whatsapp_id: str = Depends(get_current_user), start_date: str = None, end_date: str = None, db: Session = Depends(get_db)):
@@ -661,6 +673,44 @@ async def get_invoice_pdf(whatsapp_id: str, invoice_no: str, db: Session = Depen
     return StreamingResponse(pdf_buffer, media_type="application/pdf", headers={
         "Content-Disposition": f"attachment; filename=Invoice_{invoice_no}.pdf"
     })
+
+@router.get("/gst/lookup")
+async def lookup_gst(q: str = Query(...)):
+    """Looks up HSN code or searches by keyword using GST Service"""
+    service = GSTLookupService()
+    if q.isdigit() and len(q) >= 2:
+        res = await service.get_hsn_details(q)
+        return [res] if res else []
+    else:
+        return await service.search_products(q)
+
+@router.post("/user/product-master/bulk")
+async def update_product_master(
+    data: ProductMasterBulk, 
+    whatsapp_id: str = Depends(get_current_user), 
+    db: Session = Depends(get_db)
+):
+    """Bulk updates the Product Master sheet for the active business"""
+    user = db.query(User).filter(User.whatsapp_id == whatsapp_id).first()
+    if not user or not user.google_refresh_token:
+        raise HTTPException(status_code=401, detail="User not linked to Google")
+    
+    business = db.query(Business).filter(Business.id == user.active_business_id).first()
+    if not business:
+         business = db.query(Business).filter(Business.user_whatsapp_id == whatsapp_id).first()
+    
+    if not business:
+        raise HTTPException(status_code=401, detail="Business not found")
+        
+    gs = GoogleService(user.google_refresh_token)
+    try:
+        # Convert Pydantic models to dicts
+        products_dict = [p.model_dump() for p in data.products]
+        await gs.bulk_update_product_master(business.master_ledger_sheet_id, products_dict)
+        return {"status": "success", "count": len(products_dict)}
+    except Exception as e:
+        logger.error(f"Bulk update error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update Product Master: {str(e)}")
 
 @router.post("/user/generate-link-token")
 async def generate_link_token(whatsapp_id: str, db: Session = Depends(get_db)):

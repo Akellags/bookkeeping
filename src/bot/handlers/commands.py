@@ -15,6 +15,7 @@ from src.transcription_service import TranscriptionService
 from src.consultant_agent import ConsultantAgent
 from src.google_service import GoogleService
 from src.extraction.google_extractor import GoogleExtractor
+from src.bot.templates import TemplateHandler
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ ai_processor = AIProcessor()
 transcription_service = TranscriptionService()
 consultant_agent = ConsultantAgent()
 google_extractor = GoogleExtractor()
+template_handler = TemplateHandler()
 
 async def _get_extraction(text: str):
     """Internal helper to choose extraction provider based on environment"""
@@ -284,7 +286,16 @@ async def _process_new_transaction(db: Session, user: User, business: Business, 
         Transaction.status == "AWAITING_DETAILS"
     ).order_by(Transaction.created_at.desc()).first()
 
-    extraction = await _get_extraction(text)
+    is_template = template_handler.is_template(text)
+    if is_template:
+        logger.info(f"Template detected for user {user.whatsapp_id}")
+        gs = GoogleService(user.google_refresh_token)
+        product_master = await gs.get_product_master(business.master_ledger_sheet_id)
+        extraction = await template_handler.parse(text, product_master)
+    else:
+        # Fallback to AI extraction
+        extraction = await _get_extraction(text)
+
     if not extraction or not extraction.get("is_transaction"):
         if tx:
             # If we were awaiting details, maybe this text *is* the detail but AI failed to parse as full tx?
@@ -296,7 +307,7 @@ async def _process_new_transaction(db: Session, user: User, business: Business, 
         send_whatsapp_interactive(
             user.whatsapp_id,
             "I'm not sure how to handle that. How can I help you? 🚀",
-            ["💰 Money In", "💸 Money Out", "🛠️ Business Tools"]
+            ["Sale", "Purchases", "Payments", "Expenses", "Stats: Monthly Total", "GSTR1: JSON Report"]
         )
         return {"status": "main_menu_offered"}
 
@@ -306,7 +317,7 @@ async def _process_new_transaction(db: Session, user: User, business: Business, 
         if extraction.get("transaction_type") and extraction.get("transaction_type") != "PENDING":
              tx.transaction_type = extraction.get("transaction_type")
         
-        if tx.transaction_type == "Expense":
+        if is_template or tx.transaction_type == "Expense":
              tx.status = "PENDING_CONFIRM"
         else:
              tx.status = "PENDING_SUBTYPE"
@@ -325,11 +336,15 @@ async def _process_new_transaction(db: Session, user: User, business: Business, 
             business_id=business.id,
             transaction_type=tx_type,
             extracted_json=extraction,
-            status="PENDING_TYPE"
+            status="PENDING_CONFIRM" if is_template else "PENDING_TYPE"
         )
         db.add(tx)
     
     db.commit()
+
+    if is_template:
+        from src.bot.handlers.interactive import _handle_confirmation
+        return await _handle_confirmation(db, user, business, tx, "Template")
 
     if tx.status == "PENDING_TYPE":
         # If it was a fresh tx, we ask for the bucket

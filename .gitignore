@@ -41,3 +41,13 @@ logs/
 docs/notes_1_bak.md
 error1.md
 clean_client_id.txt
+firebase_key.json
+gst_key.txt
+*.json
+!package.json
+!tsconfig.json
+!firebase.json
+!*.md.json
+!docs/*.json
+!src/**/*.json
+!*.pdf

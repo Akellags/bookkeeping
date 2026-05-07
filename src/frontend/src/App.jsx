@@ -31,6 +31,7 @@ import Layout from './components/Layout';
 import LandingPage from './pages/LandingPage';
 import Dashboard from './pages/Dashboard';
 import RecordTransaction from './pages/RecordTransaction';
+import ProductMaster from './pages/ProductMaster';
 import GSTReports from './pages/GSTReports';
 import Settings from './pages/Settings';
 import OnboardingSuccess from './pages/OnboardingSuccess';
@@ -113,6 +114,7 @@ function AppContent() {
         <Route element={<ProtectedRoute />}>
           <Route element={<MainLayout />}>
             <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/inventory" element={<ProductMaster />} />
             <Route path="/reports" element={<GSTReports />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/transactions/new" element={<RecordTransaction />} />
