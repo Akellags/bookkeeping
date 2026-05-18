@@ -16,7 +16,7 @@ import stripe
 from src.db_service import get_db, User, Business, Transaction, SessionLocal
 from src.extraction.orchestrator import ExtractionOrchestrator
 from src.extraction.schemas import ExtractionRequest
-from src.google_service import GoogleService
+from src.google_service import GoogleService, GoogleTokenExpiredError
 from src.gst_service import GSTLookupService
 from src.utils import (
     get_state_code, get_uqc_code, upload_whatsapp_media, 
@@ -53,6 +53,9 @@ class ProductItem(BaseModel):
 class ProductMasterBulk(BaseModel):
     products: List[ProductItem]
 
+class ProductVerifyRequest(BaseModel):
+    products: List[ProductItem]
+
 @router.get("/user/stats")
 async def get_user_stats(whatsapp_id: str = Depends(get_current_user), start_date: str = None, end_date: str = None, db: Session = Depends(get_db)):
     """Fetches real-time stats for the dashboard with optional date filtering"""
@@ -70,9 +73,16 @@ async def get_user_stats(whatsapp_id: str = Depends(get_current_user), start_dat
         raise HTTPException(status_code=404, detail="No business profile found")
 
     # 1. Fetch Google Sheets totals
-    gs = GoogleService(user.google_refresh_token)
-    ledger_stats = await gs.get_ledger_stats(business.master_ledger_sheet_id, start_date, end_date)
-    
+    try:
+        gs = GoogleService(user.google_refresh_token)
+        ledger_stats = await gs.get_ledger_stats(business.master_ledger_sheet_id, start_date, end_date)
+    except GoogleTokenExpiredError:
+        raise HTTPException(status_code=401, detail="token_expired")
+    except Exception as e:
+        logger.error(f"Error fetching stats: {e}")
+        # Return empty stats as fallback or raise error
+        ledger_stats = {"count": 0, "total_sales": 0, "total_purchases": 0, "total_payments": 0, "total_expenses": 0, "paid_expenses": 0, "unpaid_expenses": 0}
+
     # 2. Return aggregated stats
     return {
         "bills": ledger_stats["count"],
@@ -105,12 +115,18 @@ async def onboard_user(setup: OnboardingSetup, whatsapp_id: str = Depends(get_cu
     business = db.query(Business).filter(Business.user_whatsapp_id == whatsapp_id).first()
     
     # Initialize Google Drive with the provided business name
-    gs = GoogleService(user.google_refresh_token)
     try:
+        gs = GoogleService(user.google_refresh_token)
         # Pass the business name to initialize_user_drive if it supports it
         # Otherwise, it will use the default from env/code
         folder_id, sheet_id, template_id = await gs.initialize_user_drive(business_name=setup.business_name)
-        
+    except GoogleTokenExpiredError:
+        raise HTTPException(status_code=401, detail="token_expired")
+    except Exception as e:
+        logger.error(f"Onboarding error during Google initialization: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to initialize Google Drive: {str(e)}")
+
+    try:
         if business:
             # Update existing placeholder business
             business.business_name = setup.business_name
@@ -684,6 +700,80 @@ async def lookup_gst(q: str = Query(...)):
     else:
         return await service.search_products(q)
 
+@router.post("/gst/verify-bulk")
+async def verify_gst_bulk(data: ProductVerifyRequest):
+    """Verifies HSN codes and rates for a list of products"""
+    service = GSTLookupService()
+    results = []
+    for p in data.products:
+        issue = None
+        official_data = None
+        
+        # 1. Basic Format Check
+        hsn = (p.hsn_code or "").strip()
+        if not hsn:
+            issue = "HSN code is missing"
+        elif not hsn.isdigit() or len(hsn) not in [4, 6, 8]:
+            issue = "Invalid HSN format (must be 4, 6, or 8 digits)"
+        else:
+            # 2. Database Lookup
+            official_data = await service.get_hsn_details(hsn)
+            if official_data:
+                # 3. Rate Comparison
+                official_rate = official_data.get("gst_rate", 0)
+                if abs(official_rate - p.gst_rate) > 0.1:
+                    issue = f"GST Rate mismatch: Official is {official_rate}%"
+            else:
+                issue = "HSN not found in GST database"
+        
+        if issue:
+            results.append({
+                "shortcode": p.shortcode,
+                "hsn_code": hsn,
+                "user_description": p.description,
+                "official_description": official_data.get("description") if official_data else None,
+                "official_rate": official_data.get("gst_rate") if official_data else None,
+                "issue": issue
+            })
+            
+    return results
+
+@router.get("/user/product-master")
+async def get_product_master_fe(
+    whatsapp_id: str = Depends(get_current_user), 
+    db: Session = Depends(get_db)
+):
+    """Fetches all products from the Product Master sheet"""
+    user = db.query(User).filter(User.whatsapp_id == whatsapp_id).first()
+    if not user or not user.google_refresh_token:
+        raise HTTPException(status_code=401, detail="User not linked to Google")
+    
+    business = db.query(Business).filter(Business.id == user.active_business_id).first()
+    if not business:
+         business = db.query(Business).filter(Business.user_whatsapp_id == whatsapp_id).first()
+    
+    if not business:
+        raise HTTPException(status_code=401, detail="Business not found")
+        
+    gs = GoogleService(user.google_refresh_token)
+    try:
+        master = await gs.get_product_master(business.master_ledger_sheet_id)
+        # Convert dict back to list for FE
+        products = []
+        for sc, p in master.items():
+            products.append({
+                "shortcode": sc,
+                "description": p["description"],
+                "hsn_code": p["hsn_code"],
+                "gst_rate": p["gst_rate"],
+                "uqc": p["uqc"],
+                "unit_price": p["unit_price"]
+            })
+        return products
+    except Exception as e:
+        logger.error(f"Error fetching product master: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/user/product-master/bulk")
 async def update_product_master(
     data: ProductMasterBulk, 
@@ -702,6 +792,7 @@ async def update_product_master(
     if not business:
         raise HTTPException(status_code=401, detail="Business not found")
         
+    logger.info(f"Bulk updating Product Master for user {whatsapp_id} with {len(data.products)} products")
     gs = GoogleService(user.google_refresh_token)
     try:
         # Convert Pydantic models to dicts

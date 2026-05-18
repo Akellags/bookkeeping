@@ -9,6 +9,7 @@ import socket
 import asyncio
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
+from google.auth.exceptions import RefreshError
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from googleapiclient.errors import HttpError
@@ -35,6 +36,10 @@ def is_transient_google_error(exception):
         return True
         
     return False
+
+class GoogleTokenExpiredError(Exception):
+    """Exception raised when Google refresh token is expired or revoked"""
+    pass
 
 # Reusable tenacity decorator for Google API calls
 google_retry = retry(
@@ -67,11 +72,31 @@ class GoogleService:
         self.sheets_service = build("sheets", "v4", http=authorized_http, cache_discovery=False)
         self.docs_service = build("docs", "v1", http=authorized_http, cache_discovery=False)
 
-    async def _execute_with_requests(self, method, url, body=None, params=None):
+    async def check_auth(self):
+        """Proactively checks if the refresh token is still valid by attempting a refresh"""
+        loop = asyncio.get_event_loop()
+        try:
+            # Credentials refresh is blocking, run in executor
+            await loop.run_in_executor(None, lambda: self.creds.refresh(Request()))
+        except RefreshError as e:
+            if "invalid_grant" in str(e).lower():
+                raise GoogleTokenExpiredError("Google token expired or revoked")
+            raise
+
+    async def _execute_with_requests(self, method, url, body=None, params=None, is_retry=False):
         """Executes a Google API call using requests with a long timeout to bypass httplib2 10060 errors"""
         if not self.creds.valid:
-            # Credentials refresh is blocking, but fast enough for now
-            self.creds.refresh(Request())
+            if is_retry:
+                # If we are already in a retry and creds are still invalid, something is wrong
+                raise GoogleTokenExpiredError("Google token expired or revoked (refresh failed)")
+                
+            try:
+                # Credentials refresh is blocking, but fast enough for now
+                self.creds.refresh(Request())
+            except RefreshError as e:
+                if "invalid_grant" in str(e).lower():
+                    raise GoogleTokenExpiredError("Google token expired or revoked")
+                raise
             
         headers = {
             "Authorization": f"Bearer {self.creds.token}",
@@ -94,6 +119,12 @@ class GoogleService:
                         timeout=150
                     )
                 )
+                
+                if response.status_code == 401 and not is_retry:
+                    # Token might have expired just after the check
+                    self.creds.valid = False
+                    return await self._execute_with_requests(method, url, body, params, is_retry=True)
+                    
                 response.raise_for_status()
                 return response.json()
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.HTTPError) as e:
@@ -173,6 +204,12 @@ class GoogleService:
                 self._add_to_cache(cache_key, "Sheet1")
                 return "Sheet1"
 
+        except GoogleTokenExpiredError:
+            raise
+        except RefreshError as e:
+            if "invalid_grant" in str(e).lower():
+                raise GoogleTokenExpiredError("Google token expired or revoked")
+            raise
         except Exception as e:
             logger.warning(f"Could not resolve sheet name via API: {e}. Using fallback: {target_name}")
         
@@ -712,9 +749,20 @@ class GoogleService:
                     except: pass
                 filtered_rows.append(row)
             return filtered_rows
+        except GoogleTokenExpiredError:
+            raise
         except Exception as e:
             logger.error(f"Error fetching ledger rows: {e}")
             return []
+
+    def _parse_float(self, val):
+        if not val: return 0.0
+        try:
+            if isinstance(val, str):
+                val = val.replace('%', '').replace(',', '').strip()
+            return float(val)
+        except:
+            return 0.0
 
     async def get_product_master(self, sheet_id: str):
         """Fetches and caches the Product Master data as a dictionary keyed by Shortcode"""
@@ -733,12 +781,14 @@ class GoogleService:
                 master[shortcode] = {
                     "description": row[1] if len(row) > 1 else "Unknown",
                     "hsn_code": row[2] if len(row) > 2 else "OTH",
-                    "gst_rate": float(row[3] or 0) if len(row) > 3 else 0,
+                    "gst_rate": self._parse_float(row[3]) if len(row) > 3 else 18.0,
                     "uqc": row[4] if len(row) > 4 else "PCS",
-                    "unit_price": float(row[5] or 0) if len(row) > 5 else 0,
+                    "unit_price": self._parse_float(row[5]) if len(row) > 5 else 0.0,
                     "last_updated": row[6] if len(row) > 6 else ""
                 }
             return master
+        except GoogleTokenExpiredError:
+            raise
         except Exception as e:
             logger.error(f"Error fetching product master: {e}")
             return {}
@@ -767,16 +817,30 @@ class GoogleService:
             
         resolved_name = await self._resolve_sheet_name(sheet_id, "Product Master")
         
-        # 1. Clear existing data
-        clear_url = f"https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}/values/'{resolved_name}'!A:G:clear"
-        await self._execute_with_requests("POST", clear_url)
+        # 1. Clear existing data - use the standard sheets_service for reliability with ranges
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None, 
+                lambda: self.sheets_service.spreadsheets().values().clear(
+                    spreadsheetId=sheet_id,
+                    range=f"'{resolved_name}'!A:G"
+                ).execute()
+            )
+        except Exception as e:
+            logger.warning(f"Failed to clear sheet via discovery API: {e}. Trying raw requests...")
+            clear_url = f"https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}/values/'{resolved_name}'!A:G:clear"
+            # Note: The raw URL needs the colon before clear. We'll use the discovery service primarily.
+            await self._execute_with_requests("POST", clear_url)
         
         # 2. Write new data
         update_url = f"https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}/values/'{resolved_name}'!A1"
         params = {"valueInputOption": "USER_ENTERED"}
         body = {"values": rows}
         
-        return await self._execute_with_requests("PUT", update_url, body=body, params=params)
+        logger.info(f"Syncing {len(rows)-1} products to '{resolved_name}'")
+        res = await self._execute_with_requests("PUT", update_url, body=body, params=params)
+        return res
 
     async def get_ledger_stats(self, sheet_id: str, start_date: str = None, end_date: str = None):
         """Fetches and aggregates stats from Sales, Purchases, Expenses, and Payments sheets"""
@@ -829,6 +893,8 @@ class GoogleService:
 
             stats["count"] = stats["sales_count"] + stats["purchases_count"] + stats["expenses_count"] + stats["payments_count"]
             return stats
+        except GoogleTokenExpiredError:
+            raise
         except Exception as e:
             logger.error(f"Error fetching ledger stats: {e}")
             return stats
@@ -905,6 +971,8 @@ class GoogleService:
                         summary["total_unpaid"] += val
                         if row[20] and row[20] != "N/A":
                             summary["overdue_payments"].append({"entity": entity_name, "amount": val, "due": row[20], "inv": row[2], "type": tx_type})
+                except GoogleTokenExpiredError:
+                    raise
                 except: continue
                 
         summary["top_customers"] = dict(summary["top_customers"].most_common(3))

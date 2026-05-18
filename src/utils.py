@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 META_ACCESS_TOKEN = (os.getenv("META_ACCESS_TOKEN") or "").strip()
 SECRET_KEY = (os.getenv("SECRET_KEY", "your-fallback-secret-key-for-dev")).strip()
+FRONTEND_URL = (os.getenv("FRONTEND_URL", "https://books.helpsu.ai")).strip()
 POPPLER_PATH = (os.getenv("POPPLER_PATH") or "").strip() # Optional for Windows testing
 
 def create_access_token(whatsapp_id: str, expires_delta: timedelta = None) -> str:
@@ -185,16 +186,16 @@ def handle_google_error(recipient_id: str, error: Exception):
     error_str = str(error).lower()
     
     # 1. Detect Authentication Errors (Revoked or Expired token)
-    if "invalid_grant" in error_str or "auth" in error_str or "unauthorized" in error_str:
-        redirect_uri = os.getenv('GOOGLE_REDIRECT_URI', 'http://localhost:8000/auth/callback')
-        base_url = redirect_uri.split('/auth/callback')[0]
-        reauth_url = f"{base_url}/auth/google?whatsapp_id={recipient_id}"
+    if "invalid_grant" in error_str or "expired" in error_str or "revoked" in error_str or "auth" in error_str or "unauthorized" in error_str:
+        # Use FRONTEND_URL instead of deriving from backend URI
+        reauth_url = f"{FRONTEND_URL}/?whatsapp_id={recipient_id}"
         
         msg = (
-            "⚠️ Help U has lost access to your Google Drive.\n\n"
-            "This usually happens if you revoked permissions or your login expired. "
-            "Please click here to re-authorize so I can continue bookkeeping:\n"
-            f"{reauth_url}"
+            "⚠️ *Action Required: Google Access Expired*\n\n"
+            "Your Google Drive authorization has expired or was revoked. "
+            "I need you to re-authorize me so I can continue recording your bills and sales.\n\n"
+            f"Please click here to re-link: {reauth_url}\n\n"
+            "Thank you! 🙏"
         )
         send_whatsapp_text(recipient_id, msg)
         return True

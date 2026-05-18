@@ -11,21 +11,27 @@ class TemplateHandler:
 
     @staticmethod
     def is_template(text: str) -> bool:
-        """Checks if the message starts with a known template prefix"""
+        """Checks if the message starts with a known template prefix (lenient check for markdown)"""
         if not text:
             return False
-        first_line = text.split('\n')[0].strip().upper()
+        # Clean markdown characters like `
+        clean_text = text.replace('`', '').strip()
+        first_line = clean_text.split('\n')[0].strip().upper()
         return any(first_line.startswith(prefix + " |") for prefix in ["S", "P", "PMT", "EXP"])
 
     async def parse(self, text: str, product_master: dict = None) -> dict:
         """Parses a template-based message into a structured transaction JSON"""
-        lines = [line.strip() for line in text.split('\n') if line.strip()]
+        # Clean markdown formatting
+        clean_text = text.replace('`', '').strip()
+        lines = [line.strip() for line in clean_text.split('\n') if line.strip()]
         if not lines:
             return None
 
         header = lines[0]
         parts = [p.strip() for p in header.split('|')]
         prefix = parts[0].upper()
+        
+        logger.info(f"TemplateHandler: Parsing {prefix} template with {len(lines)-1} items. Master size: {len(product_master) if product_master else 0}")
 
         if prefix in ["S", "P"]:
             return await self._parse_sale_purchase(prefix, parts, lines[1:], product_master)
@@ -36,6 +42,16 @@ class TemplateHandler:
         
         return None
 
+    def _safe_float(self, val, default=0.0):
+        """Safely parses a float, returning default if parsing fails or value is empty"""
+        if not val: return default
+        try:
+            s = str(val).strip()
+            if not s: return default
+            return float(s)
+        except:
+            return default
+
     async def _parse_sale_purchase(self, prefix, header_parts, item_lines, product_master: dict = None):
         """Handles S and P templates (Single and Multi-line)"""
         tx_type = "Sale" if prefix == "S" else "Purchase"
@@ -45,8 +61,8 @@ class TemplateHandler:
         if not item_lines:
             # Single-Line Format: S/P | Party | Amount (Taxable) | GST% | Item | [GSTIN] | [Date] | [Invoice #] | [POS] | [UQC]
             party_name = header_parts[1] if len(header_parts) > 1 else "Unknown"
-            taxable_value = float(header_parts[2]) if len(header_parts) > 2 else 0.0
-            gst_rate = float(header_parts[3]) if len(header_parts) > 3 else 18.0
+            taxable_value = self._safe_float(header_parts[2]) if len(header_parts) > 2 else 0.0
+            gst_rate = self._safe_float(header_parts[3], 18.0) if len(header_parts) > 3 else 18.0
             item_name = header_parts[4] if len(header_parts) > 4 else "General Items"
             
             # Smart parsing for GSTIN vs Date at index 5
@@ -77,18 +93,18 @@ class TemplateHandler:
             if lookup:
                 item_name = lookup["description"]
                 hsn = lookup["hsn_code"]
-                # Use user provided rate if it looks intentional (not the default 18.0 or matches master)
-                if len(header_parts) <= 3 or header_parts[3].strip() == "":
+                # Use user provided rate if it looks intentional
+                if len(header_parts) <= 3 or not header_parts[3].strip():
                     gst_rate = lookup["gst_rate"]
                 uqc = lookup["uqc"]
             else:
-                # Intelligent Discovery: If item_name is numeric, maybe it's an HSN?
+                # Intelligent Discovery
                 if item_name.isdigit() and len(item_name) >= 2:
                     gst_info = await self.gst_service.get_hsn_details(item_name)
                     if gst_info:
                         hsn = gst_info["hsn_code"]
                         item_name = gst_info["description"]
-                        if len(header_parts) <= 3 or header_parts[3].strip() == "":
+                        if len(header_parts) <= 3 or not header_parts[3].strip():
                             gst_rate = gst_info["gst_rate"]
                         uqc = gst_info["uqc"]
                 else:
@@ -97,8 +113,7 @@ class TemplateHandler:
                     if search_results:
                         top = search_results[0]
                         hsn = top["hsn_code"]
-                        # Use discovery rate only if user didn't specify one
-                        if len(header_parts) <= 3 or header_parts[3].strip() == "":
+                        if len(header_parts) <= 3 or not header_parts[3].strip():
                             gst_rate = top["gst_rate"]
                         uqc = top.get("uqc", "PCS")
 
@@ -117,52 +132,74 @@ class TemplateHandler:
             }]
         else:
             # Multi-Line Format
-            # Header: S/P | Party | [GSTIN] | [Date] | [Invoice #] | [POS]
+            # Header: S/P | Party | [GSTIN] | [Date] | [Invoice #] | [Type TS/TI] | [POS]
             party_name = header_parts[1] if len(header_parts) > 1 else "Unknown"
             
             gstin = ""
             date = datetime.now().strftime("%d-%m-%Y")
+            calc_type = "TS" # Default to Tax-Exclusive (Subtotal)
             
             if len(header_parts) > 2:
                 val = header_parts[2]
-                if self._is_gstin(val):
-                    gstin = val
-                elif self._is_date(val):
-                    date = val
+                if self._is_gstin(val): gstin = val
+                elif self._is_date(val): date = val
             
             if len(header_parts) > 3:
                 val = header_parts[3]
-                if self._is_date(val):
-                    date = val
-                elif not gstin and self._is_gstin(val):
-                    gstin = val
+                if self._is_date(val): date = val
+                elif not gstin and self._is_gstin(val): gstin = val
 
             invoice_no = header_parts[4] if len(header_parts) > 4 else ""
-            pos = header_parts[5] if len(header_parts) > 5 else ""
+            
+            # Smart parsing for POS vs CalcType at index 5 and 6
+            pos = ""
+            calc_type = "TS" # Default Exclusive
+            
+            if len(header_parts) > 5:
+                val = header_parts[5].upper()
+                if val in ["TS", "TI"] and val == "TI": # Only TI overrides calc_type here
+                    calc_type = "TI"
+                else:
+                    # If it's a 2-char string, likely POS (State Code)
+                    if len(val) == 2 or val.isdigit():
+                        pos = val
+                    elif val in ["TS", "TI"]: # Fallback for TS/TI if not already set as POS
+                        calc_type = val
+
+            if len(header_parts) > 6:
+                val = header_parts[6].upper()
+                if val in ["TS", "TI"]:
+                    calc_type = val
+                elif not pos:
+                    pos = val
             
             items = []
             total_amount = 0.0
             for line in item_lines:
-                # Item: Name (or Shortcode) | Qty | Unit Price | [GST%] | [UQC]
+                # Item: Name (or Shortcode) | Qty | [Unit Price] | [GST%] | [UQC]
                 i_parts = [p.strip() for p in line.split('|')]
                 if len(i_parts) < 2: continue
                 
                 i_name = i_parts[0]
-                qty = float(i_parts[1])
+                qty = self._safe_float(i_parts[1], 1.0)
                 
                 # Shortcode Lookup
                 hsn = "OTH"
-                lookup = product_master.get(i_name.upper())
+                lookup = product_master.get(i_name.strip().upper())
                 if lookup:
                     i_name = lookup["description"]
-                    price = float(i_parts[2]) if len(i_parts) > 2 else lookup["unit_price"]
-                    rate = float(i_parts[3]) if len(i_parts) > 3 else lookup["gst_rate"]
+                    # If user didn't provide price, use master price
+                    price = self._safe_float(i_parts[2], lookup["unit_price"]) if len(i_parts) > 2 else lookup["unit_price"]
+                    # If user didn't provide rate, use master rate
+                    rate = self._safe_float(i_parts[3], lookup["gst_rate"]) if len(i_parts) > 3 else lookup["gst_rate"]
                     uqc = lookup["uqc"]
                     hsn = lookup["hsn_code"]
+                    logger.info(f"  Item '{i_parts[0]}' matched shortcode. Price={price}, Rate={rate}")
                 else:
-                    price = float(i_parts[2]) if len(i_parts) > 2 else 0.0
-                    rate = float(i_parts[3]) if len(i_parts) > 3 else 18.0
+                    price = self._safe_float(i_parts[2], 0.0) if len(i_parts) > 2 else 0.0
+                    rate = self._safe_float(i_parts[3], 18.0) if len(i_parts) > 3 else 18.0
                     uqc = i_parts[4] if len(i_parts) > 4 else "PCS"
+                    logger.info(f"  Item '{i_parts[0]}' NO shortcode match. Price={price}, Rate={rate}")
                     
                     # Discovery for Multi-line
                     if i_name.isdigit() and len(i_name) >= 2:
@@ -170,18 +207,24 @@ class TemplateHandler:
                         if gst_info:
                             hsn = gst_info["hsn_code"]
                             i_name = gst_info["description"]
-                            if len(i_parts) <= 3: rate = gst_info["gst_rate"]
+                            if len(i_parts) <= 3 or not i_parts[3].strip(): rate = gst_info["gst_rate"]
                             uqc = gst_info["uqc"]
                     else:
                         search_results = await self.gst_service.search_products(i_name)
                         if search_results:
                             top = search_results[0]
                             hsn = top["hsn_code"]
-                            if len(i_parts) <= 3: rate = top["gst_rate"]
+                            if len(i_parts) <= 3 or not i_parts[3].strip(): rate = top["gst_rate"]
                             uqc = top.get("uqc", "PCS")
                 
-                i_taxable = qty * price
-                i_total = i_taxable * (1 + (rate / 100))
+                if calc_type == "TI":
+                    # Tax-Inclusive: Price is total, calculate taxable
+                    i_total = qty * price
+                    i_taxable = i_total / (1 + (rate / 100))
+                else:
+                    # Tax-Exclusive: Price is taxable
+                    i_taxable = qty * price
+                    i_total = i_taxable * (1 + (rate / 100))
                 
                 items.append({
                     "hsn_code": hsn,
@@ -194,6 +237,8 @@ class TemplateHandler:
                     "uqc": uqc
                 })
                 total_amount += i_total
+            
+            logger.info(f"TemplateHandler: Multi-line total: {total_amount}")
 
         return {
             "is_transaction": True,

@@ -143,10 +143,19 @@ async def _handle_awaiting_gstin(db: Session, user: User, business: Business, te
     if tx:
         extraction = tx.extracted_json or {}
         final_type = tx.transaction_type or "Sale"
-        if final_type == "Sale":
-            extraction["recipient_gstin"] = text.strip().upper()
+        
+        clean_text = text.strip().upper()
+        if clean_text in ["SKIP", "NO", "N/A", "NONE"]:
+            gstin_val = "N/A"
         else:
-            extraction["vendor_gstin"] = text.strip().upper()
+            gstin_val = clean_text
+
+        if final_type == "Sale":
+            extraction["recipient_gstin"] = gstin_val
+            extraction["is_b2b"] = (gstin_val != "N/A")
+        else:
+            extraction["vendor_gstin"] = gstin_val
+            extraction["is_b2b"] = (gstin_val != "N/A")
         
         tx.extracted_json = extraction
         tx.status = "PENDING_CONFIRM"

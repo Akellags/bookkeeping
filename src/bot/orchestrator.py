@@ -1,13 +1,11 @@
-import os
 import logging
-import uuid
 from datetime import datetime
 from sqlalchemy.orm import Session
 
 from sqlalchemy.exc import IntegrityError
 from src.db_service import User, Business, Transaction, ProcessedMessage
-from src.google_service import GoogleService
-from src.utils import send_whatsapp_text, send_whatsapp_interactive
+from src.google_service import GoogleService, GoogleTokenExpiredError
+from src.utils import send_whatsapp_text, send_whatsapp_interactive, handle_google_error, FRONTEND_URL
 from src.bot.handlers.commands import handle_command
 from src.bot.handlers.media import handle_media
 from src.bot.handlers.interactive import handle_interactive
@@ -83,6 +81,19 @@ class WhatsAppOrchestrator:
 
                         # 3. Handle High Priority Greetings/Menu
                         if text_body and text_body.lower() in ["hi", "hello", "hey", "help", "menu"]:
+                            # Proactive check if user is already linked
+                            user = self.db.query(User).filter(User.whatsapp_id == user_whatsapp_id).first()
+                            if user and user.google_refresh_token:
+                                try:
+                                    gs = GoogleService(user.google_refresh_token)
+                                    await gs.check_auth()
+                                except GoogleTokenExpiredError as e:
+                                    handle_google_error(user_whatsapp_id, e)
+                                    results.append({"status": "token_expired_sent"})
+                                    continue
+                                except Exception as e:
+                                    logger.warning(f"Proactive auth check failed (non-critical): {e}")
+
                             results.append(await self._send_menu(user_whatsapp_id))
                             continue
 
@@ -125,8 +136,24 @@ class WhatsAppOrchestrator:
                                 
                                 user.drive_initialized = True
                                 self.db.commit()
+                            except GoogleTokenExpiredError as e:
+                                handle_google_error(user_whatsapp_id, e)
+                                results.append({"status": "token_expired_sent"})
+                                continue
                             except Exception as e:
                                 logger.error(f"Lazy drive initialization failed for {user_whatsapp_id}: {e}")
+
+                        # 7.5 Proactive Auth Check for new flows (only if not already checking in Lazy Init)
+                        if user.drive_initialized and not user.last_interaction_type:
+                            try:
+                                gs = GoogleService(user.google_refresh_token)
+                                await gs.check_auth()
+                            except GoogleTokenExpiredError as e:
+                                handle_google_error(user_whatsapp_id, e)
+                                results.append({"status": "token_expired_sent"})
+                                continue
+                            except Exception as e:
+                                logger.warning(f"Proactive flow auth check failed: {e}")
 
                         # 8. Delegate to specific handlers
                         try:
@@ -141,6 +168,9 @@ class WhatsAppOrchestrator:
                             else:
                                 logger.warning(f"Unsupported message type: {message_type}")
                                 results.append({"status": "unsupported_type"})
+                        except GoogleTokenExpiredError as e:
+                            handle_google_error(user_whatsapp_id, e)
+                            results.append({"status": "token_expired_sent"})
                         except Exception as e:
                             logger.error(f"Error delegating message {message_id}: {e}", exc_info=True)
                             results.append({"status": "handler_error", "error": str(e)})
@@ -234,9 +264,7 @@ class WhatsAppOrchestrator:
         return None
 
     async def _send_onboarding(self, user_whatsapp_id: str):
-        redirect_uri = os.getenv('GOOGLE_REDIRECT_URI', 'http://localhost:8000/auth/callback')
-        base_url = redirect_uri.split('/auth/callback')[0]
-        onboarding_url = f"{base_url}/auth/google?whatsapp_id={user_whatsapp_id}"
+        onboarding_url = f"{FRONTEND_URL}/?whatsapp_id={user_whatsapp_id}"
         
         msg = (
             "Welcome to Help U! 🚀\n\n"

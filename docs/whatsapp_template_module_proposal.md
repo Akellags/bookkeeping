@@ -23,21 +23,23 @@ To ensure parity with the web dashboard, templates include both mandatory and op
 **Example**: `S | Apollo Pharm | 1200 | 18 | Medicines | 27AAAAA0000A1Z5 | 04-05-2026 | INV-101 | 27 | PCS`
 
 #### Multi-Item Format (New Line for each item)
-When recording multiple items, use the first line for the **Header** and subsequent lines for **Items**.
+When recording multiple items, use the first line for the **Header** and subsequent lines for **Items**. You can use **Shortcodes** (defined in Product Master) to skip entering prices and GST rates.
+
 **Format**:
 ```text
-S/P | Party Name | [GSTIN] | [Date] | [Invoice #] | [POS]
-Item Name 1 | Qty | Unit Price | GST% | [UQC]
-Item Name 2 | Qty | Unit Price | GST% | [UQC]
+S/P | Party Name | [GSTIN] | [Date] | [Invoice #] | [POS] | [Calc Type: TS/TI]
+Shortcode | Qty
+Description | Qty | Unit Price | GST% | [UQC]
 ```
+- **Calc Type**: `TS` for Tax-Exclusive (default), `TI` for Tax-Inclusive.
 
 **Example**:
 ```text
 S | Sridhar | 36AAACY6329B1ZH | 01-05-2026 | INV-101 | TS
-Logitech Keyboard | 2 | 1200 | 18
+43MT | 2
 Logitech Mouse | 5 | 600 | 12
 ```
-*Note: TS is the state code for Telangana. The bot will automatically calculate the Grand Total and Tax splits.*
+*Note: 43MT is a shortcode. The bot pulls its price and GST from the Product Master. TS is the state code for Telangana.*
 
 ### 💳 Payments (PMT)
 **Format**: `PMT | Payee/Payer | Amount | Mode | [In/Out] | [Ref #] | [Date]`

@@ -90,10 +90,18 @@ function AppContent() {
       (response) => response,
       (error) => {
         if (error.response && error.response.status === 401) {
-          console.warn(`401 Unauthorized for ${error.config.url}. Logging out...`);
-          localStorage.removeItem('whatsapp_id');
-          localStorage.removeItem('auth_token');
-          window.location.href = '/'; // Force reload to landing page
+          const detail = error.response.data?.detail;
+          
+          if (detail === 'token_expired') {
+            console.warn("Google token expired. Redirecting to re-auth...");
+            // Don't logout, just redirect to auth error with specialized message
+            window.location.href = `/auth-error?type=token_expired&message=${encodeURIComponent("Your Google Drive connection has expired. Please re-authorize to continue.")}`;
+          } else {
+            console.warn(`401 Unauthorized for ${error.config.url}. Logging out...`);
+            localStorage.removeItem('whatsapp_id');
+            localStorage.removeItem('auth_token');
+            window.location.href = '/'; // Force reload to landing page
+          }
         }
         return Promise.reject(error);
       }

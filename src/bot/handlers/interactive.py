@@ -209,6 +209,8 @@ async def _handle_payment_status(db: Session, user: User, business: Business, st
         db.commit()
         return {"status": "payment_handled"}
     except Exception as e:
+        if handle_google_error(user.whatsapp_id, e):
+            return {"status": "google_error_handled"}
         logger.error(f"Error updating payment status: {e}")
         send_whatsapp_text(user.whatsapp_id, "Failed to update Google Sheet status.")
         return {"status": "error"}
@@ -283,7 +285,7 @@ async def _handle_type_selection(db: Session, user: User, business: Business, tx
             multi_example = (
                 f"*Complete example:*\n"
                 f"`{button_title[0]} | Sridhar | 36AAACY6329B1ZH | 01-05-2026 | INV-101 | TS`\n"
-                f"`Logitech Keyboard | 2 | 1200 | 18`\n"
+                f"`43MT | 2`\n"
                 f"`Logitech Mouse | 5 | 600 | 12`"
             )
             
@@ -461,6 +463,14 @@ async def _handle_confirmation(db: Session, user: User, business: Business, tx: 
             date = extraction.get("date", "N/A")
             gstin = extraction.get("recipient_gstin") or extraction.get("vendor_gstin")
             
+            # If it's a Sale/Purchase and GSTIN is missing, ask for it
+            if final_type in ["Sale", "Purchase"] and not gstin:
+                send_whatsapp_text(user.whatsapp_id, f"I noticed the **GSTIN** is missing for this {final_type}.\n\nPlease reply with the GSTIN if this is a B2B record. Otherwise, type *'No'* or *'Skip'* to continue.")
+                user.last_interaction_type = "AWAITING_GSTIN"
+                user.last_interaction_data = {"tx_id": tx.id}
+                db.commit()
+                return {"status": "awaiting_gstin_template"}
+
             msg = f"📝 *Template Parsed Successfully!*\n\n"
             msg += f"🔹 *Type*: {display_type}\n"
             msg += f"👤 *Party*: {party}\n"

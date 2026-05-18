@@ -2,8 +2,8 @@ import os
 import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from src.db_service import SessionLocal, User, Business
-from src.utils import send_whatsapp_text
-from src.google_service import GoogleService
+from src.utils import send_whatsapp_text, handle_google_error
+from src.google_service import GoogleService, GoogleTokenExpiredError
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,9 @@ async def send_overdue_reminders():
                     msg += "\nWould you like me to draft a reminder message for them? Type 'Advice' to discuss."
                     send_whatsapp_text(user.whatsapp_id, msg)
                     logger.info(f"Sent overdue reminder to {user.whatsapp_id}")
+            except GoogleTokenExpiredError as e:
+                logger.warning(f"Google token expired for user {user.whatsapp_id} during scheduler task")
+                handle_google_error(user.whatsapp_id, e)
             except Exception as e:
                 logger.error(f"Error processing overdue for {user.whatsapp_id}: {e}")
     finally:
